@@ -133,47 +133,36 @@ CLIMATE_CSS = """
       background: #f1f0ef; border: 1px solid #ddd9d5; color: #4a443f;
     }
 
-    /* 現在値（日別詳細・当日のみ）。折れ線の右端を目で追わせずに「今どうなのか」を
-       数字で出す。単位は数字より小さく muted にして、値そのものを最初に読ませる。 */
-    .climate-now {
-      background: var(--surface); border: 1.5px solid var(--border-2);
-      border-radius: 16px; padding: 0.7rem 0.85rem 0.75rem; margin-bottom: 0.55rem;
+    /* 「室温」見出しの右に測定時刻。2枚のグラフで共通なので、カードごとに
+       持たせず見出しに1つだけ置く */
+    .climate-head { display: flex; align-items: baseline; }
+    .climate-head .at {
+      margin-left: auto; font-size: 0.7rem; font-weight: 600;
+      color: var(--muted); font-variant-numeric: tabular-nums;
     }
-    .climate-now.warn { background: #fdf8ef; border-color: #ecd9b8; }
-    .climate-now.crit { background: #fdf0ec; border-color: #f2d3c9; }
-    .cn-head { display: flex; align-items: center; gap: 0.45rem; }
-    .cn-time {
-      margin-left: auto; font-size: 0.7rem; color: var(--muted);
-      font-variant-numeric: tabular-nums;
-    }
-    .cn-vals {
-      display: grid; grid-template-columns: 1fr 1fr;
-      margin-top: 0.5rem;
-    }
-    /* 2列の区切り。縦罫を1本引くだけで、どちらの数字がどちらの見出しに
-       属するかが視線を戻さずに分かる */
-    .cn-val + .cn-val { padding-left: 0.9rem; border-left: 1px solid var(--border-2); }
-    .cn-label { display: block; font-size: 0.7rem; font-weight: 700; color: var(--muted); }
-    .cn-num {
-      display: block; margin-top: 0.05rem;
-      font-size: 1.95rem; font-weight: 800; line-height: 1.15;
-      font-variant-numeric: tabular-nums; letter-spacing: -0.01em;
-    }
-    .cn-num i {
-      font-style: normal; font-size: 0.88rem; font-weight: 700;
-      color: var(--muted); margin-left: 0.08rem;
-    }
-    .climate-now.warn .cn-temp { color: var(--t-warn); }
-    .climate-now.crit .cn-temp { color: var(--t-crit); }
 
     /* グラフ（日別詳細） */
     .chart-card {
       background: var(--surface); border: 1.5px solid var(--border-2);
       border-radius: 16px; padding: 0.7rem 0.3rem 0.5rem; margin-bottom: 0.55rem;
     }
-    .chart-head { display: flex; align-items: baseline; gap: 0.45rem; padding: 0 0.6rem; }
+    .chart-head { display: flex; align-items: flex-start; gap: 0.45rem; padding: 0 0.6rem; }
+    .chart-head-l { display: flex; align-items: center; gap: 0.4rem; padding-top: 0.15rem; }
     .chart-title { font-size: 0.8rem; font-weight: 800; }
-    .chart-now { margin-left: auto; font-size: 0.74rem; color: var(--muted); font-variant-numeric: tabular-nums; }
+    /* 現在値はグラフのカード内に置く。折れ線の右端を目で追わなくても今の値が読める。
+       単位は数字より小さく muted にして、値そのものを最初に読ませる */
+    .chart-head-r { margin-left: auto; text-align: right; }
+    .chart-cur {
+      display: block; font-size: 1.5rem; font-weight: 800; line-height: 1.1;
+      font-variant-numeric: tabular-nums; letter-spacing: -0.01em;
+    }
+    .chart-cur i {
+      font-style: normal; font-size: 0.78rem; font-weight: 700;
+      color: var(--muted); margin-left: 0.06rem;
+    }
+    .chart-cur.warn { color: var(--t-warn); }
+    .chart-cur.crit { color: var(--t-crit); }
+    .chart-now { display: block; font-size: 0.7rem; color: var(--muted); font-variant-numeric: tabular-nums; }
     /* JS のクランプが効かなかった場合の保険。横だけ塞ぐ（overflow:hidden だと
        吹き出しが上方向に切れるので不可。overflow-x:clip は縦を visible のまま残せる） */
     .chart-wrap { position: relative; overflow-x: clip; }
@@ -182,8 +171,11 @@ CLIMATE_CSS = """
     .grid-line { stroke: var(--border-2); stroke-width: 1; }
     .axis-text { fill: var(--muted); font-size: 9px; font-variant-numeric: tabular-nums; }
     .band-crit { fill: var(--t-crit); opacity: 0.07; }
+    .band-warn { fill: var(--t-warn); opacity: 0.07; }
     .thresh-line { stroke: var(--t-crit); stroke-width: 1; stroke-dasharray: 3 3; opacity: 0.55; }
     .thresh-text { fill: var(--t-crit); font-size: 8.5px; font-weight: 700; }
+    .thresh-line.warn { stroke: var(--t-warn); }
+    .thresh-text.warn { fill: var(--t-warn); }
     .series-line { fill: none; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
     .end-dot { stroke: var(--surface); stroke-width: 2; }
     /* opacity をここで指定してはいけない。CSS は presentation attribute に勝つので、
@@ -300,11 +292,12 @@ CLIMATE_JS = """
     }
 
     /* ── 日別詳細: 温度・湿度の2枚（1枚に2軸は立てない） ── */
-    function build(id, tipId, key, lo, hi, ticks, unit, color, thresh) {
+    function build(id, tipId, key, lo, hi, ticks, unit, color, threshes) {
       var svg = document.getElementById(id);
       if (!svg) { return; }
       var tip = document.getElementById(tipId);
-      var W = 340, H = thresh ? 124 : 100, pL = 26, pR = 10, pT = 10, pB = 18;
+      threshes = threshes || [];
+      var W = 340, H = threshes.length ? 124 : 100, pL = 26, pR = 10, pT = 10, pB = 18;
       var iw = W - pL - pR, ih = H - pT - pB;
       svg.setAttribute("viewBox", "0 0 " + W + " " + H);
       // ★横軸は常に 0〜24時で固定し、点は自分の時刻の位置へ置く。
@@ -321,17 +314,43 @@ CLIMATE_JS = """
       });
       if (!pts.length) { return; }
 
+      // ★指定範囲の外に出た記録があれば範囲を広げる。
+      //   範囲を固定したまま切ると、暑い日ほど上へ飛び出す＝**一番見せたい記録だけが
+      //   グラフから消える**。普段は 22〜28℃ の狭い幅で微妙な上下を読ませたいので、
+      //   既定は狭く取り、外れたときだけ広げる。
+      //   広げる先は偶数側へ丸める。ceil だけだと 28.5℃ の日に上端が29℃になり、
+      //   目盛りの「28℃」と「29℃」が隣接して読めなくなる（2℃刻みで揃える）。
+      pts.forEach(function (p) {
+        if (p.v > hi) { hi = Math.ceil(p.v / 2) * 2; }
+        if (p.v < lo) { lo = Math.floor(p.v / 2) * 2; }
+      });
+      // 目盛りは範囲の内側のものだけ残し、上下端を必ず入れる（端が無いと軸が読めない）
+      ticks = [lo].concat(ticks.filter(function (v) { return v > lo && v < hi; }), [hi]);
+
       var f = document.createDocumentFragment();
 
-      if (thresh && thresh < hi) {
-        f.appendChild(el("rect", { x: pL, y: pT, width: iw, height: Math.max(0, Y(thresh) - pT), class: "band-crit" }));
-        f.appendChild(el("line", { x1: pL, y1: Y(thresh), x2: pL + iw, y2: Y(thresh), class: "thresh-line" }));
-        var tt = el("text", { x: pL + iw, y: Y(thresh) - 3, class: "thresh-text", "text-anchor": "end" });
-        tt.textContent = "危険 " + thresh + "℃";
+      // 閾値は複数引ける。範囲外（hi 以上）のものは描かない——範囲が広がったときだけ
+      // 上の線が現れる形になり、平常時は 26℃ の1本で済む。
+      threshes.forEach(function (th) {
+        if (th.v >= hi) { return; }
+        f.appendChild(el("rect", {
+          x: pL, y: pT, width: iw, height: Math.max(0, Y(th.v) - pT), class: "band-" + th.cls
+        }));
+        f.appendChild(el("line", {
+          x1: pL, y1: Y(th.v), x2: pL + iw, y2: Y(th.v), class: "thresh-line " + th.cls
+        }));
+        var tt = el("text", {
+          x: pL + iw, y: Y(th.v) - 3, class: "thresh-text " + th.cls, "text-anchor": "end"
+        });
+        tt.textContent = th.label;
         f.appendChild(tt);
-      }
+      });
       ticks.forEach(function (v) {
-        f.appendChild(el("line", { x1: pL, y1: Y(v), x2: pL + iw, y2: Y(v), class: "grid-line" }));
+        // 閾値と同じ高さには実線を引かない（破線と二重になって汚い）。数値ラベルは出す
+        var onThresh = threshes.some(function (th) { return th.v === v; });
+        if (!onThresh) {
+          f.appendChild(el("line", { x1: pL, y1: Y(v), x2: pL + iw, y2: Y(v), class: "grid-line" }));
+        }
         var t = el("text", { x: pL - 5, y: Y(v) + 3, class: "axis-text", "text-anchor": "end" });
         t.textContent = v + unit;
         f.appendChild(t);
@@ -424,7 +443,10 @@ CLIMATE_JS = """
       hit.addEventListener("pointerleave", hide);
     }
 
-    build("chart-temp", "tip-temp", "temp", 22, 34, [22, 28, 34], "℃", C.crit, 28);
+    // 22〜28℃ の狭い幅。閾値は26℃（アラートが鳴る線）。28℃を超えた日は範囲が
+    // 自動で広がり、そのとき初めて 28℃ の危険線も現れる。
+    build("chart-temp", "tip-temp", "temp", 22, 28, [22, 24, 26, 28], "℃", C.crit,
+          [{ v: 26, cls: "warn", label: "注意 26℃" }, { v: 28, cls: "crit", label: "危険 28℃" }]);
     build("chart-hum", "tip-hum", "hum", 40, 90, [40, 65, 90], "%", C.hum, null);
   })();
   </script>
@@ -594,36 +616,25 @@ patch("index_v2.html", [
 
 CLIMATE_BLOCK = """<!-- ── 室温（詳細ページはグラフ2枚のみ） ──────── -->
 {% if climate and climate_series %}
-<div class="section-label">室温</div>
+{# 現在値は当日のページにしか出さない。過去日に今の室温を出すと、その日の記録だと
+   誤読される。停止中は値そのものが無いので下の注意書きに任せる #}
+{% set show_now = climate_is_today and climate.temp is not none %}
+<div class="section-label climate-head">室温{% if show_now %}<span class="at">{{ climate.measured_at }} 時点</span>{% endif %}</div>
 {% if climate.temp is none %}
 <div class="climate-stale">
   <strong>{{ climate.age_hours }}時間 更新が止まっている。</strong>電池切れの可能性。以下は停止前までの記録。
 </div>
 {% endif %}
-{# 現在値は当日のページにしか出さない。過去日に今の室温を大きく出すと、
-   その日の記録だと誤読される。停止中は値そのものが無いので上の注意書きに任せる #}
-{% if climate_is_today and climate.temp is not none %}
-<div class="climate-now {{ climate.status }}">
-  <div class="cn-head">
-    <span class="t-pill {{ climate.status }}">{{ climate.status_ja }}</span>
-    <span class="cn-time">{{ climate.measured_at }} 時点</span>
-  </div>
-  <div class="cn-vals">
-    <div class="cn-val">
-      <span class="cn-label">室温</span>
-      <span class="cn-num cn-temp">{{ climate.temp }}<i>℃</i></span>
-    </div>
-    <div class="cn-val">
-      <span class="cn-label">湿度</span>
-      <span class="cn-num">{{ climate.hum }}<i>%</i></span>
-    </div>
-  </div>
-</div>
-{% endif %}
 <div class="chart-card">
   <div class="chart-head">
-    <span class="chart-title">室温</span>
-    <span class="chart-now">最高 {{ climate_summary.t_max }}℃ / 最低 {{ climate_summary.t_min }}℃</span>
+    <div class="chart-head-l">
+      <span class="chart-title">室温</span>
+      {% if show_now %}<span class="t-pill {{ climate.status }}">{{ climate.status_ja }}</span>{% endif %}
+    </div>
+    <div class="chart-head-r">
+      {% if show_now %}<span class="chart-cur {{ climate.status }}">{{ climate.temp }}<i>℃</i></span>{% endif %}
+      <span class="chart-now">最高 {{ climate_summary.t_max }}℃ / 最低 {{ climate_summary.t_min }}℃</span>
+    </div>
   </div>
   <div class="chart-wrap">
     <svg class="chart-svg" id="chart-temp" role="img"
@@ -633,8 +644,13 @@ CLIMATE_BLOCK = """<!-- ── 室温（詳細ページはグラフ2枚のみ）
 </div>
 <div class="chart-card">
   <div class="chart-head">
-    <span class="chart-title">湿度</span>
-    <span class="chart-now">最高 {{ climate_summary.h_max }}% / 最低 {{ climate_summary.h_min }}%</span>
+    <div class="chart-head-l">
+      <span class="chart-title">湿度</span>
+    </div>
+    <div class="chart-head-r">
+      {% if show_now %}<span class="chart-cur">{{ climate.hum }}<i>%</i></span>{% endif %}
+      <span class="chart-now">最高 {{ climate_summary.h_max }}% / 最低 {{ climate_summary.h_min }}%</span>
+    </div>
   </div>
   <div class="chart-wrap">
     <svg class="chart-svg" id="chart-hum" role="img" aria-label="湿度の推移。"></svg>
