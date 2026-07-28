@@ -42,7 +42,9 @@ THRESHOLDS = [
     ("crit", 28.0, None, "危険"),
 ]
 CRIT_TEMP = 28.0
-STALE_HOURS = 3
+# 何時間データが来なければ「止まった」とみなすか。通知の閾値も兼ねる。
+# 動作確認のときだけ GOMA_STALE_HOURS=0.01 のように小さくして試せる。
+STALE_HOURS = float(os.environ.get("GOMA_STALE_HOURS", "3"))
 
 # 華氏か摂氏かの分かれ目。室内でこの値をまたぐのは単位が違うときだけ。
 UNIT_SPLIT = 45.0
@@ -102,6 +104,7 @@ def _connect() -> sqlite3.Connection:
         )
     """)
     con.execute("CREATE INDEX IF NOT EXISTS ix_climate_ts ON climate_log(ts)")
+    con.execute("CREATE TABLE IF NOT EXISTS climate_meta (k TEXT PRIMARY KEY, v TEXT NOT NULL)")
     con.commit()
     return con
 
@@ -252,3 +255,39 @@ def current(rows=None, stale: bool = False, **_):
 
 def has_data() -> bool:
     return bool(_rows("SELECT 1 FROM climate_log LIMIT 1"))
+
+
+# ── 監視状態（通知の重複を避けるための覚え書き） ──────────────────────
+
+def get_meta(key: str, default=None):
+    r = _rows("SELECT v FROM climate_meta WHERE k = ?", (key,))
+    return r[0][0] if r else default
+
+
+def set_meta(key: str, value: str) -> None:
+    con = _connect()
+    try:
+        con.execute("INSERT OR REPLACE INTO climate_meta(k, v) VALUES (?, ?)", (key, str(value)))
+        con.commit()
+    finally:
+        con.close()
+
+
+def staleness() -> dict:
+    """記録が何時間止まっているか。通知の判定材料。
+
+    一度も記録が無い場合は stale としない（センサー設置前に鳴っても意味がない）。
+    """
+    r = _rows("SELECT ts, temp_c, hum FROM climate_log ORDER BY ts DESC LIMIT 1")
+    if not r:
+        return {"known": False, "is_stale": False, "age_hours": None,
+                "last_ts": None, "temp": None, "hum": None}
+    ts_s, temp, hum = r[0]
+    try:
+        ts = datetime.fromisoformat(ts_s)
+    except ValueError:
+        return {"known": False, "is_stale": False, "age_hours": None,
+                "last_ts": None, "temp": None, "hum": None}
+    age = (datetime.now(JST).replace(tzinfo=None) - ts).total_seconds() / 3600.0
+    return {"known": True, "is_stale": age >= STALE_HOURS, "age_hours": age,
+            "last_ts": ts, "temp": round(temp, 1), "hum": int(round(hum))}
