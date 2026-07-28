@@ -312,10 +312,6 @@
     border-color: var(--accent);
   }
   .btn-action:disabled { opacity: 0.5; cursor: not-allowed; }
-  .conf-badge {
-    font-size: 0.65rem;
-    color: var(--muted);
-  }
   .vote-badge {
     font-size: 0.65rem;
     font-weight: 700;
@@ -574,7 +570,6 @@
             </span>
             {% endif %}
             <span style="display:flex;align-items:center;gap:5px;flex-shrink:0;">
-              {% if entry.confidence %}<span class="conf-badge">{{ "%.0f"|format(entry.confidence * 100) }}%</span>{% endif %}
               {% if entry.decided_by == "flash" and entry.vote_total %}
               <span class="vote-badge" title="Flash {{ entry.vote_total }}票中 {{ entry.vote_agree }}票一致">🗳️ {{ entry.vote_agree }}/{{ entry.vote_total }}</span>
               {% elif entry.decided_by == "pro" %}
@@ -703,13 +698,11 @@ async function reanalyze(btn, logId) {
       pillEl.className = `pill ${data.activity_label}`;
       pillEl.textContent = data.activity_label_ja;
     }
-    const confEl = row.querySelector('.conf-badge');
-    if (confEl) confEl.textContent = `${Math.round(data.confidence * 100)}%`;
     let voteEl = row.querySelector('.vote-badge');
     if (!voteEl) {
       voteEl = document.createElement('span');
       voteEl.className = 'vote-badge';
-      confEl?.after(voteEl);
+      row.querySelector('.btn-action')?.parentElement?.prepend(voteEl);
     }
     if (data.decided_by === 'flash' && data.vote_total) {
       voteEl.className = 'vote-badge';

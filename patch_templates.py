@@ -446,6 +446,18 @@ TL_TEMP = """            {% endif %}
 """
 
 patch("day_v2.html", [
+    # AI の分析精度バッジ（87% 等）を削除。
+    # タイムラインに湿度が % で並ぶようになり、どちらの % か判別できないため。
+    ('              {% if entry.confidence %}<span class="conf-badge">{{ "%.0f"|format(entry.confidence * 100) }}%</span>{% endif %}\n', "", 1),
+    # 上で消したので死ぬ CSS
+    ("  .conf-badge {\n    font-size: 0.65rem;\n    color: var(--muted);\n  }\n", "", 1),
+    # バッジを消したので常に null になる死んだ参照
+    ("    const confEl = row.querySelector('.conf-badge');\n"
+     "    if (confEl) confEl.textContent = `${Math.round(data.confidence * 100)}%`;\n", "", 1),
+    # 再分析後の投票バッジ挿入が confEl 起点だったため、バッジが消えると
+    # `confEl?.after()` が no-op になり DOM へ挿さらない。操作ボタンの親に入れる。
+    ("      confEl?.after(voteEl);",
+     "      row.querySelector('.btn-action')?.parentElement?.prepend(voteEl);", 1),
     ("<!-- Timeline -->", CLIMATE_BLOCK + "<!-- Timeline -->", 1),
     ('              <span class="pill {{ entry.activity_label }}">{{ entry.activity_label_ja }}</span>\n            {% endif %}\n',
      '              <span class="pill {{ entry.activity_label }}">{{ entry.activity_label_ja }}</span>\n' + TL_TEMP, 1),
