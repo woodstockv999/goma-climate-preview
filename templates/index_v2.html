@@ -369,12 +369,14 @@
   </div>
   <!-- 行動ストリップと同じ時間軸の室温 -->
   {% if climate_series %}
-  <div class="spark-head">
-    <span>室温</span>
-    <span>最高 <b>{{ climate_summary.t_max }}℃</b>　最低 <b>{{ climate_summary.t_min }}℃</b></span>
+  <div class="spark-card">
+    <div class="spark-head">
+      <span>室温</span>
+      <span>最高 <b>{{ climate_summary.t_max }}℃</b>　最低 <b>{{ climate_summary.t_min }}℃</b></span>
+    </div>
+    <svg class="spark" id="spark" role="img"
+         aria-label="直近24時間の室温推移。最高{{ climate_summary.t_max }}℃、最低{{ climate_summary.t_min }}℃。"></svg>
   </div>
-  <svg class="spark" id="spark" role="img"
-       aria-label="直近24時間の室温推移。最高{{ climate_summary.t_max }}℃、最低{{ climate_summary.t_min }}℃。"></svg>
   <script type="application/json" id="climate-data">{{ climate_series | tojson }}</script>
   {% endif %}
 

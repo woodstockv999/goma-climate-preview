@@ -79,10 +79,21 @@ CLIMATE_CSS = """
     .today-climate.stale { background: #f1f0ef; border-color: #ddd9d5; }
     .today-climate.stale .lead { color: var(--muted); }
 
-    /* 行動ストリップに揃えたスパークライン（トップ） */
+    /* 行動ストリップに揃えたスパークライン（トップ）。
+       枠は .day-card と同じ処方。横パディングは入れない——入れるとSVGの幅が縮み、
+       真上の 24h ストリップと時間軸がズレて、この図の意味（暑い時間帯に何をしていたか）が壊れる。
+       上下の余白だけカード内に持たせ、左右は border 1.5px 分のみ内側に入る。 */
+    .spark-card {
+      background: var(--surface);
+      border: 1.5px solid var(--border-2);
+      border-radius: 12px;
+      padding: 0.4rem 0 0.3rem;
+      margin-top: 0.45rem;
+    }
     .spark-head {
       display: flex; align-items: baseline; justify-content: space-between;
-      font-size: 0.66rem; color: var(--muted); margin-top: 0.5rem;
+      font-size: 0.66rem; color: var(--muted);
+      padding: 0 0.6rem; margin-bottom: 0.15rem;
     }
     .spark-head b { color: var(--text); font-size: 0.74rem; font-variant-numeric: tabular-nums; }
     .spark { display: block; width: 100%; height: auto; }
@@ -364,12 +375,14 @@ CLIMATE_ROW = """
 
 SPARK = """  <!-- 行動ストリップと同じ時間軸の室温 -->
   {% if climate_series %}
-  <div class="spark-head">
-    <span>室温</span>
-    <span>最高 <b>{{ climate_summary.t_max }}℃</b>　最低 <b>{{ climate_summary.t_min }}℃</b></span>
+  <div class="spark-card">
+    <div class="spark-head">
+      <span>室温</span>
+      <span>最高 <b>{{ climate_summary.t_max }}℃</b>　最低 <b>{{ climate_summary.t_min }}℃</b></span>
+    </div>
+    <svg class="spark" id="spark" role="img"
+         aria-label="直近24時間の室温推移。最高{{ climate_summary.t_max }}℃、最低{{ climate_summary.t_min }}℃。"></svg>
   </div>
-  <svg class="spark" id="spark" role="img"
-       aria-label="直近24時間の室温推移。最高{{ climate_summary.t_max }}℃、最低{{ climate_summary.t_min }}℃。"></svg>
   <script type="application/json" id="climate-data">{{ climate_series | tojson }}</script>
   {% endif %}
 
