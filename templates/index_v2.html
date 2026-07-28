@@ -1,0 +1,479 @@
+{% extends "base_v2.html" %}
+
+{% block title %}ごまモニター{% endblock %}
+
+{% block head %}
+<style>
+  /* ── Today's Goma ────────────────────── */
+  .today-section {
+    margin-bottom: 1.5rem;
+  }
+
+  .today-card {
+    background: var(--surface);
+    border-radius: 20px;
+    overflow: hidden;
+    box-shadow: 0 4px 20px var(--shadow-md);
+    border: 1px solid var(--border-2);
+  }
+
+  .today-photo-wrap {
+    position: relative;
+    width: 100%;
+    aspect-ratio: 16/9;
+    background: var(--charcoal);
+    overflow: hidden;
+  }
+  .today-photo {
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+    object-position: 20% center;
+    display: block;
+    cursor: zoom-in;
+    transition: transform 0.3s ease;
+  }
+  .today-photo:hover { transform: scale(1.02); }
+  .today-photo-overlay {
+    position: absolute;
+    bottom: 0;
+    left: 0;
+    right: 0;
+    background: linear-gradient(transparent, rgba(26,18,14,0.7));
+    padding: 1.5rem 1rem 0.75rem;
+    display: flex;
+    align-items: flex-end;
+    justify-content: space-between;
+  }
+  .today-time-badge {
+    font-family: 'M PLUS Rounded 1c', sans-serif;
+    font-size: 0.8rem;
+    font-weight: 700;
+    color: rgba(255,255,255,0.85);
+    background: rgba(26,18,14,0.5);
+    padding: 3px 10px;
+    border-radius: 20px;
+    backdrop-filter: blur(4px);
+  }
+  .today-presence-badge {
+    font-size: 0.78rem;
+    font-weight: 700;
+    padding: 3px 10px;
+    border-radius: 20px;
+  }
+  .today-presence-badge.home {
+    background: rgba(45,154,136,0.85);
+    color: #fff;
+  }
+  .today-presence-badge.away {
+    background: rgba(176,184,196,0.85);
+    color: #333;
+  }
+
+  .today-body {
+    padding: 0.9rem 1rem 1rem;
+    display: flex;
+    align-items: flex-start;
+    gap: 0.75rem;
+  }
+  .today-label-col {
+    flex-shrink: 0;
+  }
+  .today-label-icon {
+    font-size: 1.6rem;
+    display: block;
+    margin-bottom: 0.25rem;
+    line-height: 1;
+  }
+  .today-desc {
+    font-size: 0.85rem;
+    color: var(--muted);
+    line-height: 1.5;
+    flex: 1;
+  }
+  .today-desc strong {
+    display: block;
+    color: var(--text);
+    font-size: 0.95rem;
+    margin-bottom: 0.2rem;
+  }
+
+  .no-data-card {
+    background: var(--surface);
+    border-radius: 20px;
+    padding: 2.5rem 1rem;
+    text-align: center;
+    border: 1.5px dashed var(--border);
+    color: var(--muted);
+  }
+  .no-data-card .icon { font-size: 2.5rem; margin-bottom: 0.5rem; display: block; }
+
+  /* ── Activity Strip ───────────────────── */
+  .strip-section {
+    margin-bottom: 1.5rem;
+  }
+  .strip-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    margin-bottom: 0.5rem;
+  }
+  .strip-wrap {
+    display: flex;
+    height: 36px;
+    border-radius: 10px;
+    overflow: hidden;
+    gap: 2px;
+    background: var(--border-2);
+    padding: 2px;
+  }
+  .strip-slot {
+    flex: 1;
+    border-radius: 6px;
+    cursor: default;
+    transition: transform 0.15s;
+    position: relative;
+  }
+  .strip-slot:hover { transform: scaleY(1.15); z-index: 1; }
+  .strip-slot.sleeping  { background: var(--c-sleeping); }
+  .strip-slot.active    { background: var(--c-active); }
+  .strip-slot.walking   { background: var(--c-walking); }
+  .strip-slot.playing   { background: var(--c-playing); }
+  .strip-slot.drinking  { background: var(--c-drinking); }
+  .strip-slot.sitting   { background: var(--c-sitting); }
+  .strip-slot.absent    { background: var(--c-absent); }
+  .strip-slot.unknown,
+  .strip-slot.unrecorded { background: var(--border); }
+
+  .strip-legend {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.4rem;
+    margin-top: 0.5rem;
+  }
+  .legend-item {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    font-size: 0.68rem;
+    color: var(--muted);
+  }
+  .legend-dot {
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    flex-shrink: 0;
+  }
+
+  /* ── Snapshot button ──────────────────── */
+  .toolbar {
+    display: flex;
+    align-items: center;
+    gap: 0.75rem;
+    margin-bottom: 0.75rem;
+    flex-wrap: wrap;
+  }
+  .toolbar-title {
+    font-family: 'M PLUS Rounded 1c', sans-serif;
+    font-size: 0.95rem;
+    font-weight: 700;
+    color: var(--text);
+    flex: 1;
+  }
+  .btn-snap {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.4rem;
+    padding: 0.45rem 1.1rem;
+    background: var(--charcoal);
+    color: var(--gold);
+    border: none;
+    border-radius: 50px;
+    font-size: 0.82rem;
+    font-weight: 700;
+    cursor: pointer;
+    transition: opacity 0.15s, transform 0.1s;
+    white-space: nowrap;
+  }
+  .btn-snap:hover { opacity: 0.85; transform: translateY(-1px); }
+  .btn-snap:active { transform: scale(0.97); }
+  .btn-snap:disabled { opacity: 0.45; cursor: default; transform: none; }
+  #snap-msg {
+    font-size: 0.78rem;
+    color: var(--muted);
+    width: 100%;
+  }
+
+  /* ── Day Feed ─────────────────────────── */
+  .day-feed {
+    display: grid;
+    gap: 0.6rem;
+  }
+
+  .day-card {
+    display: flex;
+    align-items: stretch;
+    background: var(--surface);
+    border-radius: 16px;
+    border: 1.5px solid var(--border-2);
+    overflow: hidden;
+    text-decoration: none;
+    color: inherit;
+    transition: border-color 0.15s, box-shadow 0.15s, transform 0.1s;
+  }
+  .day-card:hover {
+    border-color: var(--accent);
+    box-shadow: 0 4px 16px var(--shadow-md);
+    transform: translateY(-1px);
+    text-decoration: none;
+  }
+  .day-card:active { transform: scale(0.99); }
+
+  .day-thumb {
+    width: 84px;
+    flex-shrink: 0;
+    background: var(--surface-2);
+    overflow: hidden;
+  }
+  .day-thumb img {
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+    object-position: 20% center;
+    display: block;
+  }
+  .day-thumb-placeholder {
+    width: 100%;
+    height: 100%;
+    min-height: 72px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 1.5rem;
+    opacity: 0.3;
+  }
+
+  .day-info {
+    flex: 1;
+    padding: 0.6rem 0.8rem;
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
+    gap: 0.35rem;
+    min-width: 0;
+  }
+  .day-date {
+    font-family: 'M PLUS Rounded 1c', sans-serif;
+    font-size: 0.88rem;
+    font-weight: 700;
+    color: var(--text);
+  }
+  .day-pills {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.3rem;
+  }
+
+  @media (max-width: 400px) {
+    .day-thumb { width: 68px; }
+    .today-body { gap: 0.5rem; }
+  }
+</style>
+{% endblock %}
+
+{% block header_slot %}
+<span style="font-size:0.78rem;font-weight:700;color:#c0a070;letter-spacing:0.02em;">{{ today_str }}</span>
+{% endblock %}
+
+{% block content %}
+
+<!-- ── Today's Goma ───────────────────────────── -->
+<div class="today-section">
+  <div class="section-label">今のごま</div>
+  {% if latest_entry and latest_entry.media_path %}
+    {% set img_path = base + '/image/' + latest_entry.media_path %}
+    <div class="today-card">
+      <div class="today-photo-wrap">
+        <img class="today-photo" src="{{ img_path }}"
+             alt="最新スナップショット"
+             onclick="openLightbox('{{ img_path }}')">
+        <div class="today-photo-overlay">
+          <span class="today-time-badge">{{ "%02d"|format(latest_entry.hour) }}:00 の記録</span>
+          {% if latest_entry.dog_present %}
+          <span class="today-presence-badge home">🏠 在宅中</span>
+          {% else %}
+          <span class="today-presence-badge away">🚪 お出かけ中</span>
+          {% endif %}
+          {% if climate %}
+          <span class="ov-temp {{ climate.status }}">🌡 {% if climate.temp is not none %}{{ climate.temp }}℃{% else %}--.-℃{% endif %}</span>
+          {% endif %}
+        </div>
+      </div>
+      <div class="today-body">
+        <div class="today-label-col">
+          <span class="today-label-icon">{{ latest_entry.emoji }}</span>
+          <span class="pill {{ latest_entry.activity_label }}">{{ latest_entry.activity_label_ja }}</span>
+        </div>
+        <p class="today-desc">
+          {% if latest_entry.description %}
+            <strong>{{ latest_entry.description }}</strong>
+          {% else %}
+            <strong>{{ latest_entry.activity_label_ja }}</strong>
+          {% endif %}
+          <span style="font-size:0.75rem;">{{ latest_entry.date_str }} {{ "%02d"|format(latest_entry.hour) }}:00 時点</span>
+        </p>
+      </div>
+    </div>
+  {% else %}
+    <div class="no-data-card">
+      <span class="icon">📷</span>
+      <p style="font-weight:700; margin-bottom:0.3rem;">まだデータがありません</p>
+      <p style="font-size:0.82rem;">Ring カメラの接続後、自動で記録が始まります</p>
+    </div>
+  {% endif %}
+</div>
+
+
+<!-- ── 室温（今どうなのか） ───────────────────── -->
+{% if climate %}
+<div class="today-section" style="margin-top:0.9rem;">
+  <div class="section-label">室温</div>
+  <div class="today-climate {{ climate.status }}">
+    <span class="t-pill {{ climate.status }}">{{ climate.status_ja }}</span>
+    {% if climate.temp is not none %}
+      <span class="lead">{{ climate.temp }}℃ / {{ climate.hum }}%</span>
+      <span class="note">
+        本日の最高 {{ climate_summary.t_max }}℃
+        {%- if climate_summary.hot_range %}（{{ climate_summary.hot_range[0] }}〜{{ climate_summary.hot_range[1] }}時が28℃超）{% endif %}
+      </span>
+    {% else %}
+      <span class="lead">計測できていない</span>
+      <span class="note">最終更新 {{ climate.measured_at }}（{{ climate.age_hours }}時間前）・電池切れの可能性</span>
+    {% endif %}
+  </div>
+</div>
+{% endif %}
+
+<!-- ── 24h Activity Strip ─────────────────────── -->
+{% if hourly_slots %}
+<div class="strip-section">
+  <div class="strip-header">
+    <span class="section-label" style="margin-bottom:0;">直近24時間の行動</span>
+    <span style="font-size:0.68rem;color:var(--muted);">← 古い　新しい →</span>
+  </div>
+  <div class="strip-wrap">
+    {% for slot in hourly_slots %}
+    <div class="strip-slot {{ slot.label }}"
+         title="{{ slot.hour }}時: {{ slot.label_ja }}"></div>
+    {% endfor %}
+  </div>
+  <!-- 行動ストリップと同じ時間軸の室温 -->
+  {% if climate_series %}
+  <div class="spark-head">
+    <span>室温</span>
+    <span>最高 <b>{{ climate_summary.t_max }}℃</b>　最低 <b>{{ climate_summary.t_min }}℃</b></span>
+  </div>
+  <svg class="spark" id="spark" role="img"
+       aria-label="直近24時間の室温推移。最高{{ climate_summary.t_max }}℃、最低{{ climate_summary.t_min }}℃。"></svg>
+  <script type="application/json" id="climate-data">{{ climate_series | tojson }}</script>
+  {% endif %}
+
+  <div class="strip-legend">
+    {% for item in chart_data %}
+    <div class="legend-item">
+      <div class="legend-dot" style="background:var(--c-{{ item.label }}, var(--border));"></div>
+      <span>{{ item.label_ja }} {{ item.count }}h</span>
+    </div>
+    {% endfor %}
+  </div>
+</div>
+{% endif %}
+
+<!-- ── Day Feed ───────────────────────────────── -->
+<div class="toolbar">
+  <span class="toolbar-title">📅 直近30日の記録</span>
+  <button id="snap-btn" class="btn-snap" onclick="takeSnapshot()">
+    📸 今すぐ記録
+  </button>
+  <span id="snap-msg"></span>
+</div>
+
+{% if days %}
+<div class="day-feed">
+  {% for d in days %}
+  <a class="day-card" href="{{ base }}/day/{{ d.date }}">
+    <div class="day-thumb">
+      {% if d.latest_media_path %}
+        <img src="{{ base }}/image/{{ d.latest_media_path }}" loading="lazy" alt="{{ d.date }}のスナップ">
+      {% else %}
+        <div class="day-thumb-placeholder">🐾</div>
+      {% endif %}
+    </div>
+    <div class="day-info">
+      <div class="day-top">
+        <div class="day-date">{{ d.date }}</div>
+        {% if d.t_max is defined %}
+        <span class="day-tmax {{ 'crit' if d.t_status == 'crit' else '' }}">
+          {% if d.t_status in ('warn', 'crit') %}<i class="{{ d.t_status }}"></i>{% endif %}最高 {{ d.t_max }}℃
+        </span>
+        {% endif %}
+      </div>
+      <div class="day-pills">
+        {% for s in d.label_counts[:4] %}
+        <span class="pill {{ s.label }}">{{ s.label_ja }} {{ s.count }}h</span>
+        {% endfor %}
+      </div>
+    </div>
+  </a>
+  {% endfor %}
+</div>
+{% else %}
+<div class="empty-state">
+  <span class="icon">🐾</span>
+  <p style="font-weight:700; font-size:1rem; margin-bottom:0.5rem;">まだデータがありません</p>
+  <p style="font-size:0.85rem;">bootstrap_auth.py で Ring 認証を完了してください</p>
+</div>
+{% endif %}
+
+<!-- Lightbox -->
+<div id="lb" onclick="this.style.display='none'" style="display:none;position:fixed;inset:0;background:rgba(10,6,4,0.94);z-index:1000;cursor:zoom-out;align-items:center;justify-content:center;backdrop-filter:blur(4px);">
+  <img id="lb-img" alt="拡大" style="max-width:96vw;max-height:96vh;border-radius:10px;object-fit:contain;box-shadow:0 8px 48px rgba(0,0,0,0.8);">
+</div>
+
+<script>
+function openLightbox(src) {
+  const lb = document.getElementById('lb');
+  document.getElementById('lb-img').src = src;
+  lb.style.display = 'flex';
+}
+document.addEventListener('keydown', e => {
+  if (e.key === 'Escape') document.getElementById('lb').style.display = 'none';
+});
+
+async function takeSnapshot() {
+  const btn = document.getElementById('snap-btn');
+  const msg = document.getElementById('snap-msg');
+  btn.disabled = true;
+  btn.textContent = '⏳ 接続中…';
+  msg.textContent = '';
+  try {
+    const res = await fetch('{{ base }}/snapshot', {method:'POST'});
+    if (res.ok) {
+      msg.style.color = '#2d9a88';
+      msg.textContent = '✓ 記録しました！';
+    } else {
+      const text = await res.text();
+      msg.style.color = '#c06a28';
+      msg.textContent = '✗ ' + text;
+    }
+  } catch(e) {
+    msg.style.color = '#c06a28';
+    msg.textContent = '✗ ' + e;
+  }
+  btn.disabled = false;
+  btn.textContent = '📸 今すぐ記録';
+}
+</script>
+{% endblock %}
+
+<!-- climate-patch -->
