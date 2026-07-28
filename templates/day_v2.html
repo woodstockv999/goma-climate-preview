@@ -277,23 +277,6 @@
     opacity: 0.65;
   }
 
-  /* Outing */
-  .tl-entry.type-absent .tl-card {
-    background: linear-gradient(135deg, #fefce8, #fef9c3);
-    border-color: #fde68a;
-  }
-  .outing-badge {
-    display: inline-flex;
-    align-items: center;
-    gap: 5px;
-    padding: 4px 12px;
-    border-radius: 50px;
-    background: linear-gradient(135deg, var(--gold), #e6a820);
-    color: #3d1f00;
-    font-size: 0.8rem;
-    font-weight: 800;
-  }
-
   /* Action buttons */
   .btn-action {
     font-size: 0.65rem;
@@ -558,11 +541,7 @@
         {% endif %}
         <div class="tl-body">
           <div class="tl-body-row">
-            {% if is_outing %}
-              <span class="outing-badge">🐾 お出かけ中！</span>
-            {% else %}
-              <span class="pill {{ entry.activity_label }}">{{ entry.activity_label_ja }}</span>
-            {% endif %}
+            <span class="pill {{ entry.activity_label }}">{{ entry.activity_label_ja }}</span>
             {% if entry.climate %}
             <span class="tl-temp {{ 'crit' if entry.climate.status == 'crit' else '' }}">
               {%- if entry.climate.status in ('warn', 'crit') %}<i class="{{ entry.climate.status }}"></i>{% endif -%}

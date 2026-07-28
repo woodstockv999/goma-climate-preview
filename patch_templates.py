@@ -454,13 +454,43 @@ CLIMATE_BLOCK = """<!-- ── 室温（詳細ページはグラフ2枚のみ）
 
 """
 
-TL_TEMP = """            {% endif %}
+# お出かけ中だけ金バッジ＋黄色いカードで強調していたのをやめ、他のラベルと同じピルに統一する。
+# dog_present=0 の行は全件 activity_label='absent' なので、ピルでも正しく「お出かけ中」と出る。
+# あわせて各行の室温を右端に置く。
+OUTING_ANCHOR = """            {% if is_outing %}
+              <span class="outing-badge">🐾 お出かけ中！</span>
+            {% else %}
+              <span class="pill {{ entry.activity_label }}">{{ entry.activity_label_ja }}</span>
+            {% endif %}
+"""
+
+ROW_BADGES = """            <span class="pill {{ entry.activity_label }}">{{ entry.activity_label_ja }}</span>
             {% if entry.climate %}
             <span class="tl-temp {{ 'crit' if entry.climate.status == 'crit' else '' }}">
               {%- if entry.climate.status in ('warn', 'crit') %}<i class="{{ entry.climate.status }}"></i>{% endif -%}
               {{ entry.climate.temp }}℃ · {{ entry.climate.hum }}%
             </span>
             {% endif %}
+"""
+
+# 上で消したので死ぬ CSS（お出かけ中の黄色い強調そのもの）
+OUTING_CSS = """  /* Outing */
+  .tl-entry.type-absent .tl-card {
+    background: linear-gradient(135deg, #fefce8, #fef9c3);
+    border-color: #fde68a;
+  }
+  .outing-badge {
+    display: inline-flex;
+    align-items: center;
+    gap: 5px;
+    padding: 4px 12px;
+    border-radius: 50px;
+    background: linear-gradient(135deg, var(--gold), #e6a820);
+    color: #3d1f00;
+    font-size: 0.8rem;
+    font-weight: 800;
+  }
+
 """
 
 LABEL_DESC_JS = """let _editLogId = null;
@@ -508,8 +538,10 @@ patch("day_v2.html", [
     ("      confEl?.after(voteEl);",
      "      row.querySelector('.btn-action')?.parentElement?.prepend(voteEl);", 1),
     ("<!-- Timeline -->", CLIMATE_BLOCK + "<!-- Timeline -->", 1),
-    ('              <span class="pill {{ entry.activity_label }}">{{ entry.activity_label_ja }}</span>\n            {% endif %}\n',
-     '              <span class="pill {{ entry.activity_label }}">{{ entry.activity_label_ja }}</span>\n' + TL_TEMP, 1),
+    # お出かけ中の金バッジを通常ピルに統一し、各行に室温を足す
+    (OUTING_ANCHOR, ROW_BADGES, 1),
+    # 黄色い強調の CSS を削除
+    (OUTING_CSS, "", 1),
     ('<a href="/"', '<a href="{{ base }}/"', 1),
     ("{% set img_url = ('/image/' + entry.media_path) if entry.media_path else \"\" %}",
      "{% set img_url = (base + '/image/' + entry.media_path) if entry.media_path else \"\" %}", 1),
