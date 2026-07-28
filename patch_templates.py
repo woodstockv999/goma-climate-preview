@@ -99,34 +99,14 @@ CLIMATE_CSS = """
     .day-tmax i.crit { background: var(--t-crit); }
     .day-tmax.crit { color: var(--t-crit); font-weight: 700; }
 
-    /* 室温カード（日別詳細） */
-    .climate-card {
-      background: var(--surface); border: 1.5px solid var(--border-2);
-      border-left-width: 4px; border-radius: 16px; padding: 0.8rem 0.85rem;
-      display: flex; flex-direction: column; gap: 0.65rem; margin-bottom: 0.6rem;
+    /* センサー停止の注意書き（日別詳細）。
+       室温カードは廃してグラフ2枚だけにしたが、停止時に無言でグラフを出すと
+       「データが流れている」と誤読されるため、ここだけは残す。 */
+    .climate-stale {
+      font-size: 0.76rem; line-height: 1.55; padding: 0.5rem 0.6rem;
+      border-radius: 10px; margin-bottom: 0.55rem;
+      background: #f1f0ef; border: 1px solid #ddd9d5; color: #4a443f;
     }
-    .climate-card.ok    { border-left-color: var(--t-ok); }
-    .climate-card.warn  { border-left-color: var(--t-warn); }
-    .climate-card.cold  { border-left-color: var(--t-cold); }
-    .climate-card.crit  { border-left-color: var(--t-crit); }
-    .climate-card.stale { border-left-color: var(--c-absent); }
-    .climate-top { display: flex; align-items: flex-start; gap: 0.7rem; }
-    .climate-read { display: flex; flex-direction: column; gap: 0.1rem; min-width: 0; }
-    .climate-read .big {
-      font-size: 2.4rem; font-weight: 800; line-height: 1;
-      font-variant-numeric: tabular-nums; letter-spacing: -0.02em;
-    }
-    .climate-read .big .unit { font-size: 1.05rem; font-weight: 700; margin-left: 0.08em; }
-    .climate-card.stale .climate-read .big { color: var(--muted); }
-    .climate-read .meta { font-size: 0.74rem; color: var(--muted); font-variant-numeric: tabular-nums; }
-    .climate-side { margin-left: auto; display: flex; flex-direction: column; align-items: flex-end; gap: 0.3rem; }
-    .climate-side .peak { font-size: 0.68rem; color: var(--muted); font-variant-numeric: tabular-nums; }
-    .climate-msg {
-      font-size: 0.78rem; line-height: 1.55; padding: 0.5rem 0.6rem;
-      border-radius: 10px; background: var(--surface-2); border: 1px solid var(--border-2);
-    }
-    .climate-card.crit .climate-msg { background: #fdf0ec; border-color: #f2d3c9; color: #6d1c0e; }
-    .climate-card.stale .climate-msg { background: #f1f0ef; border-color: #ddd9d5; color: #4a443f; }
 
     /* グラフ（日別詳細） */
     .chart-card {
@@ -418,45 +398,18 @@ patch("index_v2.html", [
 # 3) day_v2.html — 日別詳細ページ
 # ══════════════════════════════════════════════════════════════
 
-CLIMATE_BLOCK = """<!-- ── 室温 ──────────────────────────────────── -->
-{% if climate %}
+CLIMATE_BLOCK = """<!-- ── 室温（詳細ページはグラフ2枚のみ） ──────── -->
+{% if climate and climate_series %}
 <div class="section-label">室温</div>
-<div class="climate-card {{ climate.status }}">
-  <div class="climate-top">
-    <div class="climate-read">
-      <div class="big">{% if climate.temp is not none %}{{ climate.temp }}{% else %}--.-{% endif %}<span class="unit">℃</span></div>
-      <div class="meta">
-        {% if climate.temp is not none %}
-          湿度 {{ climate.hum }}%　・　{{ climate.measured_at }} 更新
-        {% else %}
-          最終更新 {{ climate.measured_at }}（{{ climate.age_hours }}時間前）
-        {% endif %}
-      </div>
-    </div>
-    <div class="climate-side">
-      <span class="t-pill {{ climate.status }}">{{ climate.status_ja }}</span>
-      <span class="peak">
-        {% if climate.temp is not none %}この日の最高 {{ climate_summary.t_max }}℃{% else %}電池切れの可能性{% endif %}
-      </span>
-    </div>
-  </div>
-  <div class="climate-msg">
-    {% if climate.temp is none %}
-      <strong>{{ climate.age_hours }}時間 更新が止まっている。</strong>電池を交換するまで室温は分からない。古い値は表示しない。
-    {% elif climate_summary.hot_hours > 0 %}
-      <strong>28℃超えが {{ climate_summary.hot_hours }}時間</strong>（{{ climate_summary.hot_range[0] }}〜{{ climate_summary.hot_range[1] }}時）。
-      最高 {{ climate_summary.t_max }}℃。エアコンが止まっていた可能性。
-    {% else %}
-      この日は最高 {{ climate_summary.t_max }}℃・最低 {{ climate_summary.t_min }}℃。危険域には入らなかった。
-    {% endif %}
-  </div>
+{% if climate.temp is none %}
+<div class="climate-stale">
+  <strong>{{ climate.age_hours }}時間 更新が止まっている。</strong>電池切れの可能性。以下は停止前までの記録。
 </div>
-
-{% if climate_series %}
+{% endif %}
 <div class="chart-card">
   <div class="chart-head">
     <span class="chart-title">室温</span>
-    <span class="chart-now">最高 {{ climate_summary.t_max }}℃</span>
+    <span class="chart-now">最高 {{ climate_summary.t_max }}℃ / 最低 {{ climate_summary.t_min }}℃</span>
   </div>
   <div class="chart-wrap">
     <svg class="chart-svg" id="chart-temp" role="img"
@@ -467,6 +420,7 @@ CLIMATE_BLOCK = """<!-- ── 室温 ──────────────
 <div class="chart-card">
   <div class="chart-head">
     <span class="chart-title">湿度</span>
+    <span class="chart-now">{{ climate_series[-1].hum }}%</span>
   </div>
   <div class="chart-wrap">
     <svg class="chart-svg" id="chart-hum" role="img" aria-label="湿度の推移。"></svg>
@@ -474,7 +428,6 @@ CLIMATE_BLOCK = """<!-- ── 室温 ──────────────
   </div>
 </div>
 <script type="application/json" id="climate-data">{{ climate_series | tojson }}</script>
-{% endif %}
 {% endif %}
 
 """

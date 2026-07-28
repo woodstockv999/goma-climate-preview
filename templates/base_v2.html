@@ -192,34 +192,14 @@
     .day-tmax i.crit { background: var(--t-crit); }
     .day-tmax.crit { color: var(--t-crit); font-weight: 700; }
 
-    /* 室温カード（日別詳細） */
-    .climate-card {
-      background: var(--surface); border: 1.5px solid var(--border-2);
-      border-left-width: 4px; border-radius: 16px; padding: 0.8rem 0.85rem;
-      display: flex; flex-direction: column; gap: 0.65rem; margin-bottom: 0.6rem;
+    /* センサー停止の注意書き（日別詳細）。
+       室温カードは廃してグラフ2枚だけにしたが、停止時に無言でグラフを出すと
+       「データが流れている」と誤読されるため、ここだけは残す。 */
+    .climate-stale {
+      font-size: 0.76rem; line-height: 1.55; padding: 0.5rem 0.6rem;
+      border-radius: 10px; margin-bottom: 0.55rem;
+      background: #f1f0ef; border: 1px solid #ddd9d5; color: #4a443f;
     }
-    .climate-card.ok    { border-left-color: var(--t-ok); }
-    .climate-card.warn  { border-left-color: var(--t-warn); }
-    .climate-card.cold  { border-left-color: var(--t-cold); }
-    .climate-card.crit  { border-left-color: var(--t-crit); }
-    .climate-card.stale { border-left-color: var(--c-absent); }
-    .climate-top { display: flex; align-items: flex-start; gap: 0.7rem; }
-    .climate-read { display: flex; flex-direction: column; gap: 0.1rem; min-width: 0; }
-    .climate-read .big {
-      font-size: 2.4rem; font-weight: 800; line-height: 1;
-      font-variant-numeric: tabular-nums; letter-spacing: -0.02em;
-    }
-    .climate-read .big .unit { font-size: 1.05rem; font-weight: 700; margin-left: 0.08em; }
-    .climate-card.stale .climate-read .big { color: var(--muted); }
-    .climate-read .meta { font-size: 0.74rem; color: var(--muted); font-variant-numeric: tabular-nums; }
-    .climate-side { margin-left: auto; display: flex; flex-direction: column; align-items: flex-end; gap: 0.3rem; }
-    .climate-side .peak { font-size: 0.68rem; color: var(--muted); font-variant-numeric: tabular-nums; }
-    .climate-msg {
-      font-size: 0.78rem; line-height: 1.55; padding: 0.5rem 0.6rem;
-      border-radius: 10px; background: var(--surface-2); border: 1px solid var(--border-2);
-    }
-    .climate-card.crit .climate-msg { background: #fdf0ec; border-color: #f2d3c9; color: #6d1c0e; }
-    .climate-card.stale .climate-msg { background: #f1f0ef; border-color: #ddd9d5; color: #4a443f; }
 
     /* グラフ（日別詳細） */
     .chart-card {
