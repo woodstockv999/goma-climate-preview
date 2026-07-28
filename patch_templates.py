@@ -141,41 +141,6 @@ CLIMATE_CSS = """
       background: #f1f0ef; border: 1px solid #ddd9d5; color: #4a443f;
     }
 
-    /* 日別詳細の行動内訳。割合で引き伸ばす棒は時間軸を持たないので、真下の室温グラフと
-       時刻が対応しない（「12時に暑かった時、何をしていたか」が読めない）。
-       トップと同じ24枠の時間割に置き換え、**グラフの作図領域と横位置を厳密に揃える**。
-       左右の padding はグラフの pL/pR（26/340・10/340）と同じ割合。
-       .chart-card の内側に置くことで、この % が SVG の幅と同じ基準で解決される。 */
-    /* ストリップはカードに入れない（カードの中にカードが入って見える）。
-       それでもグラフと横位置を揃えるため、**.chart-card と同じ箱を透明で被せる**。
-       ★数値（1.5px + 0.3rem）で足してはいけない: border-width はブラウザが
-       デバイスピクセルへ丸めるので（1.5px 指定が dsf=1 では 1px になる）、
-       同じ指定を持たせて同じ丸めを受けさせるのが唯一ずれない方法。 */
-    .act-plot { border: 1.5px solid transparent; padding: 0 0.3rem; }
-    /* この % は .act-plot の内容幅＝SVG の幅に対して解決される */
-    .act-strip, .act-axis { margin-left: 7.647%; margin-right: 2.941%; } /* = pL/pR (26,10)/340 */
-    /* ★左右の padding は gap の半分（1px）。等間隔にするとはそういうことで、
-       2px にすると枠の中央がグラフの点から最大1pxずれる */
-    .act-strip {
-      display: flex; height: 36px; gap: 2px; padding: 2px 1px;
-      border-radius: 10px; overflow: hidden; background: var(--border-2);
-    }
-    .act-slot { flex: 1; border-radius: 5px; background: var(--border); }
-    .act-slot.sleeping { background: var(--c-sleeping); }
-    .act-slot.active   { background: var(--c-active); }
-    .act-slot.walking  { background: var(--c-walking); }
-    .act-slot.playing  { background: var(--c-playing); }
-    .act-slot.drinking { background: var(--c-drinking); }
-    .act-slot.sitting  { background: var(--c-sitting); }
-    .act-slot.absent   { background: var(--c-absent); }
-    .act-slot.unknown  { background: var(--c-unknown); }
-    /* 時刻の目盛り。グラフと同じ位置（0/6/12/18/24時の境界）に置く */
-    .act-axis { position: relative; height: 13px; margin-top: 3px; }
-    .act-axis span {
-      position: absolute; top: 0; font-size: 0.62rem; color: var(--muted);
-      font-variant-numeric: tabular-nums; white-space: nowrap;
-    }
-
     /* 「室温」見出しの右に測定時刻。2枚のグラフで共通なので、カードごとに
        持たせず見出しに1つだけ置く */
     .climate-head { display: flex; align-items: baseline; }
@@ -189,23 +154,16 @@ CLIMATE_CSS = """
       background: var(--surface); border: 1.5px solid var(--border-2);
       border-radius: 16px; padding: 0.7rem 0.3rem 0.5rem; margin-bottom: 0.55rem;
     }
-    .chart-head { display: flex; align-items: flex-start; gap: 0.45rem; padding: 0 0.6rem; }
-    .chart-head-l { display: flex; align-items: center; gap: 0.4rem; padding-top: 0.15rem; }
+    .chart-head { display: flex; align-items: center; gap: 0.4rem; padding: 0 0.6rem; }
     .chart-title { font-size: 0.8rem; font-weight: 800; }
-    /* 現在値はグラフのカード内に置く。折れ線の右端を目で追わなくても今の値が読める。
-       単位は数字より小さく muted にして、値そのものを最初に読ませる */
-    .chart-head-r { margin-left: auto; text-align: right; }
-    .chart-cur {
-      display: block; font-size: 1.5rem; font-weight: 800; line-height: 1.1;
-      font-variant-numeric: tabular-nums; letter-spacing: -0.01em;
+    .chart-now { margin-left: auto; font-size: 0.74rem; color: var(--muted); font-variant-numeric: tabular-nums; }
+    /* 最新の値は折れ線の終点に直接置く。見出しに大きく出すより、どの点の値かが分かる */
+    .cur-label {
+      fill: var(--text); font-size: 10px; font-weight: 800;
+      font-variant-numeric: tabular-nums;
     }
-    .chart-cur i {
-      font-style: normal; font-size: 0.78rem; font-weight: 700;
-      color: var(--muted); margin-left: 0.06rem;
-    }
-    .chart-cur.warn { color: var(--t-warn); }
-    .chart-cur.crit { color: var(--t-crit); }
-    .chart-now { display: block; font-size: 0.7rem; color: var(--muted); font-variant-numeric: tabular-nums; }
+    .cur-label.warn { fill: var(--t-warn); }
+    .cur-label.crit { fill: var(--t-crit); }
     /* JS のクランプが効かなかった場合の保険。横だけ塞ぐ（overflow:hidden だと
        吹き出しが上方向に切れるので不可。overflow-x:clip は縦を visible のまま残せる） */
     .chart-wrap { position: relative; overflow-x: clip; }
@@ -384,7 +342,7 @@ CLIMATE_JS = """
     }
 
     /* ── 日別詳細: 温度・湿度の2枚（1枚に2軸は立てない） ── */
-    function build(id, tipId, key, lo, hi, ticks, unit, color, threshes) {
+    function build(id, tipId, key, lo, hi, ticks, unit, color, threshes, now) {
       var svg = document.getElementById(id);
       if (!svg) { return; }
       var tip = document.getElementById(tipId);
@@ -495,12 +453,35 @@ CLIMATE_JS = """
       var lastP = pts[pts.length - 1];
       f.appendChild(el("circle", { cx: X(lastP.h), cy: Y(lastP.v), r: 4, fill: color, class: "end-dot" }));
 
+      // 最新の値は終点に直接添える（見出しに大きく出すより、どの点の値かが分かる）。
+      // 当日以外・センサー停止中は now が渡ってこないので何も出ない。
+      var curLabel = null;
+      if (now) {
+        curLabel = el("text", {
+          x: X(lastP.h) + 7, y: Y(lastP.v) - 6,
+          class: "cur-label " + (now.cls || ""), "text-anchor": "start"
+        });
+        curLabel.textContent = now.text;
+        f.appendChild(curLabel);
+      }
+
       var cross = el("line", { x1: 0, y1: pT, x2: 0, y2: pT + ih, class: "cross-line", opacity: "0" });
       var hdot = el("circle", { cx: 0, cy: 0, r: 4.5, fill: color, class: "end-dot", opacity: "0" });
       f.appendChild(cross); f.appendChild(hdot);
       var hit = el("rect", { x: pL, y: pT, width: iw, height: ih, fill: "transparent", "pointer-events": "all" });
       f.appendChild(hit);
       svg.appendChild(f);
+
+      // 終点ラベルが作図領域からはみ出すなら点の左側へ折り返す。
+      // ★幅は推定せず getComputedTextLength() で測る——文字数も書体も環境で変わるので、
+      //   決め打ちの閾値だと桁が増えた日にだけはみ出して横スクロールが出る。
+      if (curLabel) {
+        var tw = curLabel.getComputedTextLength();
+        if (X(lastP.h) + 7 + tw > pL + iw) {
+          curLabel.setAttribute("x", X(lastP.h) - 7);
+          curLabel.setAttribute("text-anchor", "end");
+        }
+      }
 
       function hide() {
         cross.setAttribute("opacity", "0"); hdot.setAttribute("opacity", "0"); tip.style.opacity = "0";
@@ -540,11 +521,18 @@ CLIMATE_JS = """
       hit.addEventListener("pointerleave", hide);
     }
 
+    // 最新の値（当日かつセンサー稼働中のみ）。テンプレートが埋める。
+    var NOW = null;
+    var nowNode = document.getElementById("climate-now");
+    if (nowNode) { NOW = JSON.parse(nowNode.textContent || "null"); }
+
     // 22〜28℃ の狭い幅。閾値は26℃（アラートが鳴る線）。28℃を超えた日は範囲が
     // 自動で広がり、そのとき初めて 28℃ の危険線も現れる。
     build("chart-temp", "tip-temp", "temp", 22, 28, [22, 24, 26, 28], "℃", C.crit,
-          [{ v: 26, cls: "warn", label: "注意 26℃" }, { v: 28, cls: "crit", label: "危険 28℃" }]);
-    build("chart-hum", "tip-hum", "hum", 40, 90, [40, 65, 90], "%", C.hum, null);
+          [{ v: 26, cls: "warn", label: "注意 26℃" }, { v: 28, cls: "crit", label: "危険 28℃" }],
+          NOW && { text: NOW.temp + "℃", cls: NOW.status });
+    build("chart-hum", "tip-hum", "hum", 40, 90, [40, 65, 90], "%", C.hum, null,
+          NOW && { text: NOW.hum + "%", cls: "" });
   })();
   </script>
 """
@@ -711,10 +699,40 @@ patch("index_v2.html", [
 # 3) day_v2.html — 日別詳細ページ
 # ══════════════════════════════════════════════════════════════
 
-# 行動内訳を「割合で引き伸ばす棒」から「24枠の時間割」へ。
-# 棒は時間軸を持たないので、真下の室温グラフと時刻が対応しなかった。
-# markup を消すので、対応する CSS も同時に消す（死んだ CSS を残さない）。
-SUMMARY_BAR_CSS = """  .summary-bar {
+# 行動内訳セクションは丸ごと削除（2026-07-29）。
+# 割合で引き伸ばす棒は時間軸を持たず、真下の室温グラフと時刻が対応しなかった。
+# 24枠の時間割へ置き換えて位置も厳密に合わせたが、それでも要らないという判断。
+# 同じ情報は下のタイムラインが1時間ごとに持っている。
+# markup と CSS を両方消す（片方だけ消すと死んだ CSS が残る）。
+SUMMARY_SECTION = """<!-- Summary bar -->
+{% if summary.label_counts %}
+<div class="summary-section">
+  <div class="section-label">行動内訳</div>
+  <div class="summary-bar">
+    {% for label, (count, label_ja) in summary.label_counts.items() %}
+    <div class="bar-seg {{ label }}" style="flex: {{ count }};" title="{{ label_ja }} {{ count }}h">
+      {% if count >= 2 %}<span>{{ label_ja }}</span>{% endif %}
+    </div>
+    {% endfor %}
+  </div>
+  <div class="summary-stats">
+    {% for label, (count, label_ja) in summary.label_counts.items() %}
+    <div class="stat-chip">
+      <span class="pill {{ label }}" style="font-size:0.65rem;padding:2px 7px;">{{ label_ja }}</span>
+      <strong>{{ count }}h</strong>
+    </div>
+    {% endfor %}
+  </div>
+</div>
+{% endif %}
+
+"""
+
+SUMMARY_CSS = """  /* ── Summary bar ─────────────────────── */
+  .summary-section {
+    margin-bottom: 1.5rem;
+  }
+  .summary-bar {
     display: flex;
     height: 44px;
     border-radius: 12px;
@@ -743,33 +761,23 @@ SUMMARY_BAR_CSS = """  .summary-bar {
   .bar-seg.absent    { background: var(--c-absent); color: #444; }
   .bar-seg.unknown   { background: var(--c-unknown); color: #555; }
 
-"""
+  .summary-stats {
+    display: flex;
+    gap: 1rem;
+    flex-wrap: wrap;
+  }
+  .stat-chip {
+    display: flex;
+    align-items: center;
+    gap: 5px;
+    font-size: 0.8rem;
+    color: var(--muted);
+  }
+  .stat-chip strong {
+    color: var(--text);
+    font-size: 0.95rem;
+  }
 
-SUMMARY_BAR = """  <div class="summary-bar">
-    {% for label, (count, label_ja) in summary.label_counts.items() %}
-    <div class="bar-seg {{ label }}" style="flex: {{ count }};" title="{{ label_ja }} {{ count }}h">
-      {% if count >= 2 %}<span>{{ label_ja }}</span>{% endif %}
-    </div>
-    {% endfor %}
-  </div>
-"""
-
-ACT_STRIP = """  <div class="act-plot">
-    <div class="act-strip">
-      {%- for e in timeline %}
-      {%- set lb = (e.activity_label or 'unknown') if e.type == 'log' else 'unrecorded' %}
-      <div class="act-slot {{ lb }}"
-           title="{{ '%02d'|format(e.hour) }}時 {{ e.activity_label_ja if e.type == 'log' else '記録なし' }}"></div>
-      {%- endfor %}
-    </div>
-    <div class="act-axis">
-      <span style="left:0">0時</span>
-      <span style="left:25%;transform:translateX(-50%)">6時</span>
-      <span style="left:50%;transform:translateX(-50%)">12時</span>
-      <span style="left:75%;transform:translateX(-50%)">18時</span>
-      <span style="right:0">24時</span>
-    </div>
-  </div>
 """
 
 CLIMATE_BLOCK = """<!-- ── 室温（詳細ページはグラフ2枚のみ） ──────── -->
@@ -783,16 +791,15 @@ CLIMATE_BLOCK = """<!-- ── 室温（詳細ページはグラフ2枚のみ）
   <strong>{{ climate.age_hours }}時間 更新が止まっている。</strong>電池切れの可能性。以下は停止前までの記録。
 </div>
 {% endif %}
+{# 最新値はグラフの終点に直接描く。JS が読む #}
+{% if show_now %}
+<script type="application/json" id="climate-now">{{ {'temp': climate.temp, 'hum': climate.hum, 'status': climate.status} | tojson }}</script>
+{% endif %}
 <div class="chart-card">
   <div class="chart-head">
-    <div class="chart-head-l">
-      <span class="chart-title">室温</span>
-      {% if show_now %}<span class="t-pill {{ climate.status }}">{{ climate.status_ja }}</span>{% endif %}
-    </div>
-    <div class="chart-head-r">
-      {% if show_now %}<span class="chart-cur {{ climate.status }}">{{ climate.temp }}<i>℃</i></span>{% endif %}
-      <span class="chart-now">最高 {{ climate_summary.t_max }}℃ / 最低 {{ climate_summary.t_min }}℃</span>
-    </div>
+    <span class="chart-title">室温</span>
+    {% if show_now %}<span class="t-pill {{ climate.status }}">{{ climate.status_ja }}</span>{% endif %}
+    <span class="chart-now">最高 {{ climate_summary.t_max }}℃ / 最低 {{ climate_summary.t_min }}℃</span>
   </div>
   <div class="chart-wrap">
     <svg class="chart-svg" id="chart-temp" role="img"
@@ -802,13 +809,8 @@ CLIMATE_BLOCK = """<!-- ── 室温（詳細ページはグラフ2枚のみ）
 </div>
 <div class="chart-card">
   <div class="chart-head">
-    <div class="chart-head-l">
-      <span class="chart-title">湿度</span>
-    </div>
-    <div class="chart-head-r">
-      {% if show_now %}<span class="chart-cur">{{ climate.hum }}<i>%</i></span>{% endif %}
-      <span class="chart-now">最高 {{ climate_summary.h_max }}% / 最低 {{ climate_summary.h_min }}%</span>
-    </div>
+    <span class="chart-title">湿度</span>
+    <span class="chart-now">最高 {{ climate_summary.h_max }}% / 最低 {{ climate_summary.h_min }}%</span>
   </div>
   <div class="chart-wrap">
     <svg class="chart-svg" id="chart-hum" role="img" aria-label="湿度の推移。"></svg>
@@ -903,9 +905,9 @@ patch("day_v2.html", [
     # `confEl?.after()` が no-op になり DOM へ挿さらない。操作ボタンの親に入れる。
     ("      confEl?.after(voteEl);",
      "      row.querySelector('.btn-action')?.parentElement?.prepend(voteEl);", 1),
-    # 行動内訳を24枠の時間割へ差し替え（室温グラフと時刻を対応させる）
-    (SUMMARY_BAR, ACT_STRIP, 1),
-    (SUMMARY_BAR_CSS, "", 1),
+    # 行動内訳セクションを丸ごと削除（markup と CSS の両方）
+    (SUMMARY_SECTION, "", 1),
+    (SUMMARY_CSS, "", 1),
     ("<!-- Timeline -->", CLIMATE_BLOCK + "<!-- Timeline -->", 1),
     # お出かけ中の金バッジを通常ピルに統一し、各行に室温を足す
     (OUTING_ANCHOR, ROW_BADGES, 1),
