@@ -86,6 +86,67 @@ def check_stale() -> None:
     climate_store.set_meta(STATE_KEY, now)
 
 
+HEAT_KEY = "heat_level"
+HEAT_NOTIFIED_KEY = "heat_notified_at"
+
+# 危険域が続く間の再通知間隔。注意域(26〜28℃)では鳴らし直さない。
+HEAT_REMIND_HOURS = 2
+
+HEAT_MSG = {
+    ("normal", "warn"): ("室温が26℃を超えました", "orange"),
+    ("normal", "crit"): ("室温が28℃を超えました（危険）", "red"),
+    ("warn", "crit"):   ("室温が28℃を超えました（危険）", "red"),
+    ("crit", "warn"):   ("28℃を下回りました（まだ26℃以上）", "orange"),
+    ("crit", "normal"): ("室温が26℃を下回りました", "green"),
+    ("warn", "normal"): ("室温が26℃を下回りました", "green"),
+}
+
+
+def check_heat(st: dict) -> None:
+    """暑さの段階が変わったら知らせる。
+
+    センサーが止まっているときは判定しない。古い値で暑い/涼しいを言っても意味がなく、
+    停止そのものは check_stale() が別に知らせる。
+    """
+    if not st["known"] or st["is_stale"] or st["temp"] is None:
+        return
+
+    prev = climate_store.get_meta(HEAT_KEY, "normal")
+    if prev not in climate_store.HEAT_LEVELS:
+        prev = "normal"
+    now = climate_store.heat_level(st["temp"], prev)
+    body = f"現在 {st['temp']}℃ / 湿度 {st['hum']}%"
+
+    if now != prev:
+        title, color = HEAT_MSG.get((prev, now), ("室温の状態が変わりました", "blue"))
+        notify(f"ごまモニター {title}", body, color)
+        climate_store.set_meta(
+            HEAT_NOTIFIED_KEY,
+            datetime.now(climate_store.JST).replace(tzinfo=None).isoformat(sep=" ", timespec="seconds"),
+        )
+        climate_store.set_meta(HEAT_KEY, now)
+        print(f"  → 暑さ {prev}→{now} を通知（{st['temp']}℃）")
+        return
+
+    # 危険域が続いている間だけ、2時間おきに念を押す
+    if now == "crit":
+        last = climate_store.get_meta(HEAT_NOTIFIED_KEY) or ""
+        due = True
+        if last:
+            try:
+                due = (datetime.now(climate_store.JST).replace(tzinfo=None)
+                       - datetime.fromisoformat(last)) >= timedelta(hours=HEAT_REMIND_HOURS)
+            except ValueError:
+                due = True
+        if due:
+            notify("ごまモニター 室温が28℃を超えたままです（危険）", body, "red")
+            climate_store.set_meta(
+                HEAT_NOTIFIED_KEY,
+                datetime.now(climate_store.JST).replace(tzinfo=None).isoformat(sep=" ", timespec="seconds"),
+            )
+            print(f"  → 危険域の継続を通知（{st['temp']}℃）")
+
+
 def main() -> int:
     stamp = datetime.now(climate_store.JST).strftime("%Y-%m-%d %H:%M:%S")
     rc = 0

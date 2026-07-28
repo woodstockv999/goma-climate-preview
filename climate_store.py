@@ -273,6 +273,32 @@ def set_meta(key: str, value: str) -> None:
         con.close()
 
 
+# ── 暑さの段階 ──────────────────────────────────────────────────────
+#
+# 閾値ちょうどで判定すると、25.9 → 26.1 → 25.9 と揺れるたびに通知が飛ぶ。
+# 上がるときは閾値ちょうど、下がるときは HEAT_HYST ぶん余分に下がってから
+# 段階を戻す（＝上げは即座、下げは慎重）。暑さの通知が遅れる方が危ないため。
+HEAT_WARN = 26.0
+HEAT_CRIT = 28.0
+HEAT_HYST = 0.5
+HEAT_LEVELS = ("normal", "warn", "crit")
+
+
+def heat_level(t: float, prev: str = "normal") -> str:
+    dn_warn, dn_crit = HEAT_WARN - HEAT_HYST, HEAT_CRIT - HEAT_HYST
+    if prev == "crit":
+        if t >= dn_crit:
+            return "crit"
+        return "warn" if t >= dn_warn else "normal"
+    if prev == "warn":
+        if t >= HEAT_CRIT:
+            return "crit"
+        return "warn" if t >= dn_warn else "normal"
+    if t >= HEAT_CRIT:
+        return "crit"
+    return "warn" if t >= HEAT_WARN else "normal"
+
+
 def staleness() -> dict:
     """記録が何時間止まっているか。通知の判定材料。
 
