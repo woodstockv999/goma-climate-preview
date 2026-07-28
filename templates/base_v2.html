@@ -358,9 +358,12 @@
         f.appendChild(el("path", { d: d, class: "series-line", stroke: sg.hot ? C.crit : C.ok }));
       });
       var lastC = SERIES[n - 1];
+      // r は viewBox 単位なので、線と違って non-scaling-stroke では細くならない。
+      // 表示倍率（約1.43倍）を見込んで小さめに取る。ホバー対象ではないので
+      // 最小ヒット領域の下限も気にしなくてよい。
       f.appendChild(el("circle", {
-        cx: sx(n - 1), cy: sy(lastC.temp), r: 3,
-        fill: lastC.temp >= 28 ? C.crit : C.ok, stroke: "#fff", "stroke-width": 1.5
+        cx: sx(n - 1), cy: sy(lastC.temp), r: 1.8,
+        fill: lastC.temp >= 28 ? C.crit : C.ok, stroke: "#fff"
       }));
       // 閾値ラベルは図内に置かない。高さ40単位に対して文字が大きく、折れ線と重なる。
       // 意味（何の線か）も伝わらないので、見出しの凡例に出している。
