@@ -1,0 +1,714 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+  <meta name="theme-color" content="#0b0a09">
+  <title>{% block title %}ごまモニター{% endblock %}</title>
+  <link rel="apple-touch-icon" sizes="180x180" href="{{ base }}/static/apple-touch-icon.png">
+  <link rel="icon" type="image/png" sizes="32x32" href="{{ base }}/static/favicon-32.png">
+  <link rel="shortcut icon" href="{{ base }}/static/favicon.ico">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Shippori+Mincho+B1:wght@400;800&display=swap" rel="stylesheet">
+  <script>document.documentElement.className += " js";</script>
+  <style>
+    /* ══════════════════════════════════════════════════════════════════
+       ごまモニター v4 ── 観測所
+
+       黒い犬が暗い部屋にいて、1時間に1度だけカメラが光る。
+       だから地は黒で、写真がこのページの唯一の光源になる。
+
+       行動と室温は棒グラフをやめ、24時間の文字盤に載せる。
+       外周の弧＝その時間の行動、内側の軌道＝室温。
+       軌道が危険円（28℃）を越えて膨らむところが、そのまま暑かった時間になる。
+       棒より場所を食うが、時刻・行動・室温の3つが一度に読める。
+       ══════════════════════════════════════════════════════════════════ */
+
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    :root {
+      --bg:        #0b0a09;
+      --bg-2:      #131110;
+      --surface:   #191614;
+      --surface-2: #221e1b;
+      --ink:       #f4efe8;
+      --ink-2:     #9b9089;
+      --ink-3:     #5f5852;
+      --hairline:  rgba(244,239,232,0.10);
+      --hairline-2:rgba(244,239,232,0.055);
+      --ember:     #ff8a3d;
+
+      --serif: "Shippori Mincho B1", "Hiragino Mincho ProN", "Yu Mincho", serif;
+      --sans: -apple-system, BlinkMacSystemFont, "Hiragino Sans",
+              "Hiragino Kaku Gothic ProN", "Noto Sans JP", sans-serif;
+
+      /* 行動8色。黒地用に validator の dark band(L 0.48–0.67) 内へ寄せてある。
+         明度帯・対地コントラストは PASS。ただし8枠は原理的に全対分離できず、
+         活動中↔歩き中は色だけでは判別困難（後述の凡例と中央表示で補う）。 */
+      --c-sleeping: #5560ac;
+      --c-active:   #2a9e8c;
+      --c-walking:  #46a663;
+      --c-playing:  #d9752a;
+      --c-drinking: #3596cc;
+      --c-sitting:  #78899b;
+      --c-absent:   #5c626b;
+      --c-unknown:  #9c8674;
+      --c-unrecorded: #241f1c;
+
+      /* 室温4色（黒地で PASS×4 / WARN×1） */
+      --t-cold: #3f8ad4;
+      --t-ok:   #2ba883;
+      --t-warn: #ad8c10;
+      --t-crit: #d63f2e;
+      --c-hum:  #3596cc;
+    }
+
+    html { -webkit-text-size-adjust: 100%; background: var(--bg); }
+
+    body {
+      font-family: var(--sans);
+      background: var(--bg);
+      color: var(--ink);
+      font-size: 16px;
+      line-height: 1.7;
+      min-height: 100dvh;
+      -webkit-font-smoothing: antialiased;
+      overflow-x: hidden;
+      touch-action: manipulation;   /* ダブルタップ拡大の抑止 */
+    }
+    #lb { touch-action: auto; }
+
+    /* ── 残り火 ────────────────────────────────
+       室温が上がるほど画面の縁が赤く滲む。危険域でだけゆっくり呼吸する。
+       情報としては冗長だが、数字を読む前に「今日は暑い」が体に入る。 */
+    .ember {
+      position: fixed; inset: 0; z-index: 0; pointer-events: none;
+      opacity: 0; transition: opacity 1.2s ease;
+      background:
+        radial-gradient(120% 60% at 50% 0%,   rgba(214,63,46,0.20), transparent 62%),
+        radial-gradient(140% 55% at 50% 100%, rgba(214,63,46,0.13), transparent 58%);
+    }
+    body.t-warn .ember { opacity: 0.5; }
+    body.t-crit .ember { opacity: 1; animation: breathe 7s ease-in-out infinite; }
+    @keyframes breathe { 0%, 100% { opacity: 0.55; } 50% { opacity: 1; } }
+
+    /* ── 粒子 ──────────────────────────────────
+       黒の平面に材質を与える。これが無いと黒がただの空白に見える。 */
+    .grain {
+      position: fixed; inset: 0; z-index: 400; pointer-events: none;
+      opacity: 0.05;
+      background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='160' height='160'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.85' numOctaves='3'/%3E%3C/filter%3E%3Crect width='160' height='160' filter='url(%23n)'/%3E%3C/svg%3E");
+    }
+
+    /* ── 上部の帯 ──────────────────────────────
+       プレビューバーとナビは1つの fixed な塊にまとめる。
+       別々に置くと、ナビだけ fixed でバーが通常フローに残り、写真の上で重なる。
+       写真の白い天井の上でも字が読めるよう、素の状態でも薄い暗幕を持たせる。 */
+    .topbar {
+      position: fixed; top: 0; left: 0; right: 0; z-index: 300;
+      background: linear-gradient(to bottom, rgba(11,10,9,0.8), rgba(11,10,9,0.35) 70%, rgba(11,10,9,0));
+      border-bottom: 1px solid transparent;
+      transition: background 0.4s ease, border-color 0.4s ease;
+    }
+    .topbar.solid {
+      background: rgba(11,10,9,0.82);
+      -webkit-backdrop-filter: saturate(150%) blur(18px);
+      backdrop-filter: saturate(150%) blur(18px);
+      border-bottom-color: var(--hairline);
+    }
+    .nav-inner {
+      max-width: 680px; margin: 0 auto; padding: 0.9rem 22px;
+      display: flex; align-items: center; gap: 0.8rem; min-height: 44px;
+    }
+    .nav-title {
+      font-family: var(--serif); font-weight: 800; font-size: 1.05rem;
+      letter-spacing: 0.06em; color: var(--ink); text-decoration: none;
+    }
+    .nav-title:hover { text-decoration: none; }
+    .nav-aside {
+      margin-left: auto; font-size: 0.7rem; color: var(--ink-2);
+      letter-spacing: 0.14em; font-variant-numeric: tabular-nums;
+    }
+    .nav-back {
+      display: inline-flex; align-items: center; gap: 0.3rem;
+      font-size: 0.8rem; color: var(--ink-2); text-decoration: none; letter-spacing: 0.1em;
+    }
+    .nav-back:hover { text-decoration: none; color: var(--ink); }
+    .nav-back::before { content: "←"; }
+
+    /* ── レイアウト ─────────────────────────── */
+    .page { position: relative; z-index: 1; max-width: 680px; margin: 0 auto; padding: 0 22px 8rem; }
+    .sec { margin-top: 6rem; }
+
+    /* 見出しは細い罫と番号を伴わせる。番号は「順序」を意味しないので使わない。 */
+    .h-sec {
+      font-family: var(--serif); font-weight: 800;
+      font-size: 1.7rem; letter-spacing: 0.04em; line-height: 1.3;
+    }
+    .sec-head {
+      display: flex; align-items: baseline; gap: 0.9rem;
+      padding-bottom: 0.8rem; margin-bottom: 1.6rem;
+      border-bottom: 1px solid var(--hairline);
+    }
+    .sec-head .aside {
+      margin-left: auto; font-size: 0.7rem; color: var(--ink-3);
+      letter-spacing: 0.12em; font-variant-numeric: tabular-nums; white-space: nowrap;
+    }
+    .lbl {
+      font-size: 0.65rem; letter-spacing: 0.28em; color: var(--ink-3);
+      text-transform: uppercase;
+    }
+
+    a { color: var(--ember); text-decoration: none; }
+    a:hover { text-decoration: underline; }
+    :focus-visible { outline: 1px solid var(--ember); outline-offset: 3px; }
+    .num { font-variant-numeric: tabular-nums; }
+
+    .tag { display: inline-flex; align-items: center; gap: 0.45rem; white-space: nowrap; }
+    .dot { width: 7px; height: 7px; border-radius: 50%; flex: none; display: block; }
+    .dot.sleeping { background: var(--c-sleeping); }
+    .dot.active   { background: var(--c-active); }
+    .dot.walking  { background: var(--c-walking); }
+    .dot.playing  { background: var(--c-playing); }
+    .dot.drinking { background: var(--c-drinking); }
+    .dot.sitting  { background: var(--c-sitting); }
+    .dot.absent   { background: var(--c-absent); }
+    .dot.unknown  { background: var(--c-unknown); }
+    .dot.unrecorded { background: var(--c-unrecorded); }
+
+    .btn {
+      font: inherit; font-size: 0.72rem; letter-spacing: 0.16em;
+      padding: 0.6rem 1.4rem; border-radius: 0;
+      border: 1px solid var(--hairline); background: transparent;
+      color: var(--ink-2); cursor: pointer; white-space: nowrap;
+      transition: color 0.3s, border-color 0.3s, background 0.3s;
+      -webkit-appearance: none;
+    }
+    .btn:hover:not(:disabled) { color: var(--ink); border-color: var(--ember); background: rgba(255,138,61,0.07); }
+    .btn:disabled { opacity: 0.35; cursor: default; }
+    .btn-sm { padding: 0.32rem 0.75rem; font-size: 0.62rem; letter-spacing: 0.12em; }
+
+    /* ── 文字盤 ────────────────────────────────
+       半径 = 室温。角度 = 時刻。外周の弧 = 行動。 */
+    .dial-wrap { position: relative; width: 100%; max-width: 380px; margin: 0 auto; }
+    .dial { display: block; width: 100%; height: auto; overflow: visible; touch-action: pan-y; }
+    .dial-read {
+      position: absolute; inset: 0; display: flex; flex-direction: column;
+      align-items: center; justify-content: center; pointer-events: none; text-align: center;
+    }
+    .dial-read .when {
+      font-size: 0.62rem; letter-spacing: 0.3em; color: var(--ink-3);
+      margin-bottom: 0.35rem; font-variant-numeric: tabular-nums;
+    }
+    .dial-read .t {
+      font-family: var(--serif); font-weight: 800; font-size: 4.1rem;
+      line-height: 0.9; letter-spacing: 0.01em; font-variant-numeric: tabular-nums;
+      transition: color 0.35s ease;
+    }
+    .dial-read .t small { font-size: 1.3rem; font-weight: 400; color: var(--ink-3); }
+    .dial-read .st { margin-top: 0.5rem; font-size: 0.72rem; letter-spacing: 0.2em; }
+    .dial-read .sub { margin-top: 0.15rem; font-size: 0.68rem; color: var(--ink-3); letter-spacing: 0.1em; }
+    .dial-read.cold .t { color: var(--t-cold); } .dial-read.cold .st { color: var(--t-cold); }
+    .dial-read.ok   .t { color: var(--ink); }    .dial-read.ok   .st { color: var(--t-ok); }
+    .dial-read.warn .t { color: var(--t-warn); } .dial-read.warn .st { color: var(--t-warn); }
+    .dial-read.crit .t { color: var(--t-crit); } .dial-read.crit .st { color: var(--t-crit); }
+    .dial-read.stale .t { color: var(--ink-3); font-size: 1.5rem; }
+    .dial-read.stale .st { color: var(--ink-3); }
+
+    .dial .hour-txt { fill: var(--ink-3); font-size: 9px; letter-spacing: 0.1em; font-family: var(--sans); }
+    .dial .ring-bg  { fill: none; stroke: rgba(244,239,232,0.05); }
+    .dial .thresh   { fill: none; stroke: var(--t-crit); stroke-width: 1; stroke-dasharray: 1.5 3.5; opacity: 0.6; }
+    .dial .orbit    { fill: none; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
+    .dial .orbit.cool { stroke: var(--t-ok); }
+    .dial .orbit.hot  { stroke: var(--t-crit); stroke-width: 2.6; filter: url(#glow); }
+    .dial .seg { stroke-linecap: butt; transition: opacity 0.25s; }
+    .dial.picking .seg { opacity: 0.28; }
+    .dial .seg.on { opacity: 1; }
+    .dial .now { fill: var(--ember); }
+
+    .legend {
+      display: flex; flex-wrap: wrap; gap: 0.5rem 1.4rem; margin-top: 2rem;
+      padding-top: 1.2rem; border-top: 1px solid var(--hairline-2);
+      font-size: 0.72rem; color: var(--ink-2); letter-spacing: 0.04em;
+    }
+    .legend .num { color: var(--ink-3); }
+    .dial-note { margin-top: 0.9rem; font-size: 0.68rem; color: var(--ink-3); letter-spacing: 0.06em; text-align: center; }
+
+    /* ── 線グラフ ───────────────────────────── */
+    .chart-wrap { position: relative; overflow-x: clip; }
+    .chart-svg { display: block; width: 100%; height: auto; touch-action: pan-y; }
+    .grid-line   { stroke: var(--hairline-2); stroke-width: 1; }
+    .axis-text   { fill: var(--ink-3); font-size: 9px; font-variant-numeric: tabular-nums; }
+    .thresh-line { stroke: var(--t-crit); stroke-width: 1; stroke-dasharray: 1.5 3.5; opacity: 0.55; }
+    .thresh-text { fill: var(--t-crit); font-size: 9px; letter-spacing: 0.08em; }
+    .band-crit   { fill: var(--t-crit); opacity: 0.07; }
+    .series-line { fill: none; stroke-width: 1.6; stroke-linecap: round; stroke-linejoin: round; }
+    .series-line.temp { stroke: var(--t-crit); }
+    .series-line.hum  { stroke: var(--c-hum); }
+    .end-dot { stroke: var(--bg); stroke-width: 1.5; }
+    .end-dot.temp { fill: var(--t-crit); }
+    .end-dot.hum  { fill: var(--c-hum); }
+    /* opacity をここに書いてはいけない。CSS は presentation attribute に勝つので
+       JS の setAttribute("opacity","0") が無効化され、初期位置 x=0（左端）に
+       縦線が残る。表示・非表示は JS 側の属性だけで制御する。 */
+    .cross-line { stroke: var(--ink); stroke-width: 1; }
+    .grad-temp stop:first-child { stop-color: var(--t-crit); stop-opacity: 0.22; }
+    .grad-temp stop:last-child  { stop-color: var(--t-crit); stop-opacity: 0; }
+    .grad-hum  stop:first-child { stop-color: var(--c-hum);  stop-opacity: 0.22; }
+    .grad-hum  stop:last-child  { stop-color: var(--c-hum);  stop-opacity: 0; }
+    .chart-tip {
+      position: absolute; pointer-events: none;
+      background: var(--ink); color: var(--bg);
+      font-size: 0.68rem; font-weight: 700; padding: 0.2rem 0.55rem;
+      white-space: nowrap; font-variant-numeric: tabular-nums;
+      opacity: 0; transition: opacity 0.12s; transform: translate(-50%, -135%); z-index: 5;
+    }
+
+    /* ── 動き ─────────────────────────────────
+       読み込みは一続きの演出として組む（散発的に動かさない）。 */
+    @keyframes rise   { from { opacity: 0; transform: translateY(30px); } to { opacity: 1; transform: none; } }
+    @keyframes lineUp { to { transform: none; } }
+    @keyframes settle { from { opacity: 0; transform: scale(1.07); } to { opacity: 1; transform: none; } }
+    @keyframes ping   { 0% { transform: scale(1); opacity: 0.9; } 70% { transform: scale(2.8); opacity: 0; } 100% { opacity: 0; } }
+
+    .js .reveal { opacity: 0; }
+    .js .reveal.in { animation: rise 1s cubic-bezier(0.16, 1, 0.3, 1) forwards; animation-delay: var(--d, 0s); }
+
+    .line-mask { display: block; overflow: hidden; }
+    .js .line-mask > span { display: block; transform: translateY(115%); }
+    .js .line-mask.in > span { animation: lineUp 1.05s cubic-bezier(0.16, 1, 0.3, 1) forwards; animation-delay: var(--d, 0s); }
+
+    .js .settle { animation: settle 1.8s cubic-bezier(0.16, 1, 0.3, 1) both; }
+    .ping { transform-origin: center; animation: ping 2.6s ease-out infinite; }
+
+    @media (prefers-reduced-motion: reduce) {
+      *, *::before, *::after { animation: none !important; transition: none !important; }
+      .js .reveal { opacity: 1; }
+      .js .line-mask > span { transform: none; }
+      .ember { animation: none; }
+    }
+
+    /* ── プレビューバー（.topbar の中） ───────── */
+    .pv {
+      border-bottom: 1px solid var(--hairline-2);
+      font-size: 0.66rem; color: var(--ink-3); letter-spacing: 0.1em;
+    }
+    .pv-inner {
+      max-width: 680px; margin: 0 auto; padding: 0.45rem 22px;
+      display: flex; align-items: center; gap: 1rem; flex-wrap: wrap;
+    }
+    .pv-inner .sp { margin-left: auto; display: flex; gap: 1.1rem; }
+    .pv a { color: var(--ink-2); }
+    .pv a:hover { color: var(--ember); }
+
+    /* ── ライトボックス ─────────────────────── */
+    #lb {
+      display: none; position: fixed; inset: 0; z-index: 1000;
+      background: rgba(0,0,0,0.96); cursor: zoom-out;
+      align-items: center; justify-content: center;
+    }
+    #lb img { max-width: 96vw; max-height: 96vh; object-fit: contain; }
+  </style>
+  {% block head %}{% endblock %}
+</head>
+<body class="{% if climate %}t-{{ climate.status }}{% endif %}">
+  <div class="ember"></div>
+  <div class="grain"></div>
+
+  <div class="topbar" id="nav">
+    {% if preview %}
+    <div class="pv">
+      <div class="pv-inner">
+        <span>プレビュー — 室温はダミー値</span>
+        <span class="sp">
+          {% if sensor_stale %}<a href="?ui=v4">センサーを戻す</a>{% else %}<a href="?ui=v4&amp;sensor=stale">センサー停止</a>{% endif %}
+          <a href="?ui=v3">v3</a>
+          <a href="?ui=v2">現行</a>
+        </span>
+      </div>
+    </div>
+    {% endif %}
+    <div class="nav-inner">{% block nav %}{% endblock %}</div>
+  </div>
+
+  {% block full %}{% endblock %}
+
+  <main class="page">
+    {% block content %}{% endblock %}
+  </main>
+
+  <script>
+  /* ── ナビの地・スクロール連動の出現 ───────────────────── */
+  (function () {
+    "use strict";
+    var nav = document.getElementById("nav");
+    function onScroll() {
+      if (nav) { nav.classList.toggle("solid", window.scrollY > 40); }
+    }
+    onScroll();
+    window.addEventListener("scroll", onScroll, { passive: true });
+
+    // 画面に入ったら一度だけ出す。IntersectionObserver が無い環境では
+    // 何もせず（.js .reveal の opacity:0 のままだと消えるので）全部見せる。
+    var targets = document.querySelectorAll(".reveal, .line-mask");
+    if (!("IntersectionObserver" in window)) {
+      targets.forEach(function (t) { t.classList.add("in"); });
+      return;
+    }
+    var io = new IntersectionObserver(function (entries) {
+      entries.forEach(function (e) {
+        if (e.isIntersecting) { e.target.classList.add("in"); io.unobserve(e.target); }
+      });
+    }, { rootMargin: "0px 0px -8% 0px", threshold: 0.08 });
+    targets.forEach(function (t) { io.observe(t); });
+  })();
+  </script>
+
+  <script>
+  /* ══ 24時間の文字盤 ═══════════════════════════════════════
+     角度＝時刻（0時が真上）、外周の弧＝行動、内側の軌道の半径＝室温。
+     破線の円は 28℃。軌道がそれより外へ出た区間が「暑かった時間」。 */
+  (function () {
+    "use strict";
+    var host = document.getElementById("dial");
+    if (!host) { return; }
+    var actNode = document.getElementById("dial-activity");
+    var clNode = document.getElementById("climate-data");
+    var ACT = actNode ? JSON.parse(actNode.textContent || "[]") : [];
+    var CL = clNode ? JSON.parse(clNode.textContent || "[]") : [];
+    var NS = "http://www.w3.org/2000/svg";
+    var CX = 150, CY = 150;
+    var R_ACT = 132, W_ACT = 12;          // 行動リング
+    // 時刻の数字はリングの外側に出るので、viewBox に余白を持たせないと
+    // 左右（6時・18時）の文字が切れる。テンプレート側の指定はここで上書きする。
+    host.setAttribute("viewBox", "-18 -18 336 336");
+    var T_LO = 22, T_HI = 34, R_LO = 74, R_HI = 114;   // 室温の軌道
+    var CRIT = 28;
+    var reduce = window.matchMedia && window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+
+    function el(n, a) {
+      var e = document.createElementNS(NS, n);
+      for (var k in a) { if (a[k] !== null && a[k] !== undefined) { e.setAttribute(k, a[k]); } }
+      return e;
+    }
+    function polar(r, deg) {
+      var a = (deg - 90) * Math.PI / 180;
+      return [CX + r * Math.cos(a), CY + r * Math.sin(a)];
+    }
+    function arc(r, a0, a1) {
+      var p0 = polar(r, a0), p1 = polar(r, a1);
+      return "M" + p0[0].toFixed(2) + " " + p0[1].toFixed(2) +
+             " A" + r + " " + r + " 0 " + ((a1 - a0) > 180 ? 1 : 0) + " 1 " +
+             p1[0].toFixed(2) + " " + p1[1].toFixed(2);
+    }
+    function rOf(t) {
+      var f = (t - T_LO) / (T_HI - T_LO);
+      return R_LO + Math.max(0, Math.min(1, f)) * (R_HI - R_LO);
+    }
+
+    var defs = el("defs", {});
+    var flt = el("filter", { id: "glow", x: "-60%", y: "-60%", width: "220%", height: "220%" });
+    flt.appendChild(el("feGaussianBlur", { stdDeviation: "3", result: "b" }));
+    var mg = el("feMerge", {});
+    mg.appendChild(el("feMergeNode", { in: "b" }));
+    mg.appendChild(el("feMergeNode", { in: "SourceGraphic" }));
+    flt.appendChild(mg); defs.appendChild(flt); host.appendChild(defs);
+
+    // 地の薄いリング（記録の無い時間帯もここに残る）
+    host.appendChild(el("circle", { cx: CX, cy: CY, r: R_ACT, class: "ring-bg", "stroke-width": W_ACT }));
+
+    /* ── 外周: 行動の弧 ── */
+    var segs = [];
+    ACT.forEach(function (s) {
+      if (s.label === "unrecorded") { return; }
+      var a0 = s.hour * 15 + 1.1, a1 = (s.hour + 1) * 15 - 1.1;
+      var p = el("path", {
+        d: arc(R_ACT, a0, a1), class: "seg", "stroke-width": W_ACT, fill: "none",
+        stroke: "var(--c-" + s.label + ", var(--c-unknown))"
+      });
+      var ttl = el("title", {});
+      ttl.textContent = s.hour + "時 " + s.label_ja;
+      p.appendChild(ttl);
+      host.appendChild(p);
+      segs.push({ hour: s.hour, node: p, label_ja: s.label_ja });
+    });
+
+    /* ── 内側: 室温の軌道 ── */
+    var byHour = {};
+    CL.forEach(function (c) { byHour[c.hour] = c; });
+
+    if (CL.length) {
+      host.appendChild(el("circle", { cx: CX, cy: CY, r: rOf(CRIT), class: "thresh" }));
+
+      // Catmull-Rom を三次ベジエへ。24点の折れ線だと多角形に見えてしまう。
+      var pts = CL.map(function (c) { return polar(rOf(c.temp), c.hour * 15 + 7.5); });
+      function spline(list) {
+        if (list.length < 2) { return ""; }
+        var d = "M" + list[0][0].toFixed(2) + " " + list[0][1].toFixed(2);
+        for (var i = 0; i < list.length - 1; i++) {
+          var p0 = list[i - 1] || list[i], p1 = list[i], p2 = list[i + 1], p3 = list[i + 2] || p2;
+          d += " C" + (p1[0] + (p2[0] - p0[0]) / 6).toFixed(2) + " " + (p1[1] + (p2[1] - p0[1]) / 6).toFixed(2) +
+               " " + (p2[0] - (p3[0] - p1[0]) / 6).toFixed(2) + " " + (p2[1] - (p3[1] - p1[1]) / 6).toFixed(2) +
+               " " + p2[0].toFixed(2) + " " + p2[1].toFixed(2);
+        }
+        return d;
+      }
+      // 危険域だけ別のパスにして、太く光らせる
+      var run = [], hot = CL[0].temp >= CRIT, orbits = [];
+      CL.forEach(function (c, i) {
+        var isHot = c.temp >= CRIT;
+        run.push(pts[i]);
+        if (isHot !== hot) { orbits.push({ hot: hot, pts: run.slice() }); run = [pts[i]]; hot = isHot; }
+      });
+      if (run.length) { orbits.push({ hot: hot, pts: run }); }
+      orbits.forEach(function (o) {
+        if (o.pts.length < 2) { return; }
+        host.appendChild(el("path", { d: spline(o.pts), class: "orbit " + (o.hot ? "hot" : "cool") }));
+      });
+    }
+
+    /* ── 時刻の目盛り ── */
+    [0, 3, 6, 9, 12, 15, 18, 21].forEach(function (h) {
+      var p = polar(R_ACT + 16, h * 15 + 7.5);
+      var t = el("text", {
+        x: p[0].toFixed(1), y: (p[1] + 3).toFixed(1),
+        class: "hour-txt", "text-anchor": "middle"
+      });
+      t.textContent = h;
+      host.appendChild(t);
+    });
+
+    /* ── 現在時刻の印 ── */
+    var nowHour = host.dataset.now ? parseInt(host.dataset.now, 10) : null;
+    if (nowHour !== null && !isNaN(nowHour)) {
+      var np = polar(R_ACT, nowHour * 15 + 7.5);
+      var g = el("g", { style: "transform-origin:" + np[0].toFixed(1) + "px " + np[1].toFixed(1) + "px" });
+      if (!reduce) { g.setAttribute("class", "ping"); }
+      g.appendChild(el("circle", { cx: np[0].toFixed(1), cy: np[1].toFixed(1), r: 4, class: "now" }));
+      host.appendChild(g);
+      host.appendChild(el("circle", { cx: np[0].toFixed(1), cy: np[1].toFixed(1), r: 2.6, class: "now" }));
+    }
+
+    /* ── 入場: 弧を時計回りに描く ── */
+    if (!reduce) {
+      segs.forEach(function (s, i) {
+        var len = s.node.getTotalLength();
+        s.node.style.strokeDasharray = len;
+        s.node.style.strokeDashoffset = len;
+        s.node.style.transition = "stroke-dashoffset 0.5s ease " + (0.25 + i * 0.035) + "s";
+      });
+      host.querySelectorAll(".orbit").forEach(function (o) {
+        var len = o.getTotalLength();
+        o.style.strokeDasharray = len;
+        o.style.strokeDashoffset = len;
+        o.style.transition = "stroke-dashoffset 1.6s cubic-bezier(0.16,1,0.3,1) 1.1s";
+      });
+      requestAnimationFrame(function () {
+        requestAnimationFrame(function () {
+          segs.forEach(function (s) { s.node.style.strokeDashoffset = 0; });
+          host.querySelectorAll(".orbit").forEach(function (o) { o.style.strokeDashoffset = 0; });
+        });
+      });
+    }
+
+    /* ── 中央の読み: 触れた時刻に差し替える ── */
+    var read = document.getElementById("dial-read");
+    if (!read) { return; }
+    var ALT = read.dataset.alt || "—";
+    var base = {
+      when: read.dataset.when || "", temp: read.dataset.temp || "",
+      st: read.dataset.st || "", sub: read.dataset.sub || "", cls: read.dataset.cls || "ok"
+    };
+    var elWhen = read.querySelector(".when"), elT = read.querySelector(".t"),
+        elSt = read.querySelector(".st"), elSub = read.querySelector(".sub");
+
+    function show(o) {
+      elWhen.textContent = o.when;
+      // 数値のときだけ単位を小さく添える。テンプレート側で HTML を組んで
+      // data 属性に入れるとエスケープされて素通りするので、組み立てはここで行う。
+      if (o.temp === "" || o.temp === null || o.temp === undefined) {
+        elT.textContent = o.alt || ALT;
+      } else {
+        elT.textContent = "";
+        elT.appendChild(document.createTextNode(o.temp));
+        var u = document.createElement("small");
+        u.textContent = "℃";
+        elT.appendChild(u);
+      }
+      elSt.textContent = o.st;
+      elSub.textContent = o.sub;
+      read.className = "dial-read " + o.cls;
+    }
+    function reset() {
+      host.classList.remove("picking");
+      segs.forEach(function (s) { s.node.classList.remove("on"); });
+      show(base);
+    }
+    reset();   // 触れる前の初期表示。これが無いと中央が空のままになる
+
+    function pick(ev) {
+      var r = host.getBoundingClientRect();
+      var x = (ev.clientX - r.left) / r.width * 300 - CX;
+      var y = (ev.clientY - r.top) / r.height * 300 - CY;
+      var rad = Math.sqrt(x * x + y * y);
+      if (rad < R_LO - 26 || rad > R_ACT + 14) { reset(); return; }
+      var deg = (Math.atan2(y, x) * 180 / Math.PI + 90 + 360) % 360;
+      var h = Math.floor(deg / 15);
+      var seg = null;
+      segs.forEach(function (s) { if (s.hour === h) { seg = s; } });
+      var c = byHour[h];
+      if (!seg && !c) { reset(); return; }
+      host.classList.add("picking");
+      segs.forEach(function (s) { s.node.classList.toggle("on", s.hour === h); });
+      show({
+        when: ("0" + h).slice(-2) + ":00",
+        temp: c ? c.temp : "",
+        alt: "室温の記録なし",
+        st: seg ? seg.label_ja : "記録なし",
+        sub: c ? ("湿度 " + c.hum + "%") : "",
+        cls: c ? c.status : "stale"
+      });
+    }
+    host.addEventListener("pointermove", pick);
+    host.addEventListener("pointerdown", pick);
+    host.addEventListener("pointerleave", reset);
+  })();
+  </script>
+
+  <script>
+  /* ── 線グラフ（日別詳細） ─────────────────────────────── */
+  (function () {
+    "use strict";
+    var node = document.getElementById("climate-data");
+    if (!node || !document.getElementById("chart-temp")) { return; }
+    var SERIES = JSON.parse(node.textContent || "[]");
+    if (!SERIES.length) { return; }
+    var NS = "http://www.w3.org/2000/svg";
+
+    function el(n, a) {
+      var e = document.createElementNS(NS, n);
+      for (var k in a) { if (a[k] !== null && a[k] !== undefined) { e.setAttribute(k, a[k]); } }
+      return e;
+    }
+
+    function build(id, tipId, vals, lo, hi, ticks, unit, kind, thresh) {
+      var svg = document.getElementById(id);
+      if (!svg) { return; }
+      var tip = document.getElementById(tipId);
+      var W = 340, H = thresh ? 118 : 96, pL = 26, pR = 10, pT = 12, pB = 18;
+      var iw = W - pL - pR, ih = H - pT - pB, last = vals.length - 1;
+      svg.setAttribute("viewBox", "0 0 " + W + " " + H);
+      var X = function (i) { return pL + (iw * i) / last; };
+      var Y = function (v) { return pT + ih - ((v - lo) / (hi - lo)) * ih; };
+      var f = document.createDocumentFragment();
+
+      if (thresh && thresh < hi) {
+        f.appendChild(el("rect", { x: pL, y: pT, width: iw, height: Math.max(0, Y(thresh) - pT), class: "band-crit" }));
+        f.appendChild(el("line", { x1: pL, y1: Y(thresh), x2: pL + iw, y2: Y(thresh), class: "thresh-line" }));
+        // 右端に置くと右肩上がりの日に必ず折れ線と重なる。左端へ寄せ、
+        // 地色の下敷きを敷いて線の上を通っても読めるようにする。
+        f.appendChild(el("rect", { x: pL + 1, y: Y(thresh) - 11, width: 46, height: 11, fill: "var(--bg)" }));
+        var tt = el("text", { x: pL + 4, y: Y(thresh) - 3, class: "thresh-text", "text-anchor": "start" });
+        tt.textContent = "危険 " + thresh + "℃";
+        f.appendChild(tt);
+      }
+      ticks.forEach(function (v) {
+        f.appendChild(el("line", { x1: pL, y1: Y(v), x2: pL + iw, y2: Y(v), class: "grid-line" }));
+        var t = el("text", { x: pL - 6, y: Y(v) + 3.5, class: "axis-text", "text-anchor": "end" });
+        t.textContent = v + unit;
+        f.appendChild(t);
+      });
+      // 現在時刻のラベルは必ず出し、定時ラベルが近すぎるときはそちらを省く
+      [0, 6, 12, 18, last].forEach(function (i) {
+        if (i > last || (i !== last && last - i < 3)) { return; }
+        var t = el("text", {
+          x: X(i), y: H - 4, class: "axis-text",
+          "text-anchor": i === 0 ? "start" : (i === last ? "end" : "middle")
+        });
+        t.textContent = (i === 23 ? 24 : i) + "時";
+        f.appendChild(t);
+      });
+
+      var dLine = "";
+      vals.forEach(function (v, i) { dLine += (i ? "L" : "M") + X(i).toFixed(1) + " " + Y(v).toFixed(1) + " "; });
+      var gid = id + "-g", defs = el("defs", {});
+      var lg = el("linearGradient", { id: gid, class: "grad-" + kind, x1: "0", y1: "0", x2: "0", y2: "1" });
+      lg.appendChild(el("stop", { offset: "0%" }));
+      lg.appendChild(el("stop", { offset: "100%" }));
+      defs.appendChild(lg); f.appendChild(defs);
+      f.appendChild(el("path", {
+        d: dLine + "L" + X(last).toFixed(1) + " " + (pT + ih) + " L" + pL + " " + (pT + ih) + " Z",
+        fill: "url(#" + gid + ")", stroke: "none"
+      }));
+      f.appendChild(el("path", { d: dLine, class: "series-line " + kind }));
+      f.appendChild(el("circle", { cx: X(last), cy: Y(vals[last]), r: 3, class: "end-dot " + kind }));
+
+      var cross = el("line", { x1: 0, y1: pT, x2: 0, y2: pT + ih, class: "cross-line", opacity: "0" });
+      var hdot = el("circle", { cx: 0, cy: 0, r: 4, class: "end-dot " + kind, opacity: "0" });
+      f.appendChild(cross); f.appendChild(hdot);
+      var hit = el("rect", { x: pL, y: pT, width: iw, height: ih, fill: "transparent", "pointer-events": "all" });
+      f.appendChild(hit);
+      svg.appendChild(f);
+
+      function move(ev) {
+        var r = svg.getBoundingClientRect();
+        var i = Math.round(((((ev.clientX - r.left) / r.width) * W) - pL) / iw * last);
+        if (i < 0) { i = 0; }
+        if (i > last) { i = last; }
+        var cx = X(i), cy = Y(vals[i]);
+        cross.setAttribute("x1", cx); cross.setAttribute("x2", cx); cross.setAttribute("opacity", "0.32");
+        hdot.setAttribute("cx", cx); hdot.setAttribute("cy", cy); hdot.setAttribute("opacity", "1");
+        // 先に文面を入れてから幅を測る（幅が確定しないとクランプできない）
+        tip.textContent = SERIES[i].hour + ":00　" + vals[i] + unit;
+        tip.style.opacity = "1";
+        tip.style.top = (cy / H * 100) + "%";
+        // 端で吹き出しがはみ出すとページが横に広がり、iPhone が縮小表示になる
+        var wrapW = (svg.parentElement && svg.parentElement.clientWidth) || svg.clientWidth;
+        var half = tip.offsetWidth / 2 + 2;
+        var px = (cx / W) * wrapW;
+        if (wrapW > tip.offsetWidth + 4) { px = Math.max(half, Math.min(wrapW - half, px)); }
+        tip.style.left = px + "px";
+      }
+      hit.addEventListener("pointermove", move);
+      hit.addEventListener("pointerdown", move);
+      hit.addEventListener("pointerleave", function () {
+        cross.setAttribute("opacity", "0"); hdot.setAttribute("opacity", "0"); tip.style.opacity = "0";
+      });
+    }
+
+    build("chart-temp", "tip-temp", SERIES.map(function (c) { return c.temp; }), 22, 34, [22, 28, 34], "℃", "temp", 28);
+    build("chart-hum", "tip-hum", SERIES.map(function (c) { return c.hum; }), 40, 90, [40, 65, 90], "%", "hum", null);
+  })();
+  </script>
+
+  <script>
+  /* ページのピンチ／ダブルタップ拡大を禁止する。写真の拡大表示中だけ許可。
+     meta viewport の user-scalable=no は iOS Safari が無視するので効かない。 */
+  (function () {
+    "use strict";
+    function lightboxOpen() {
+      var lb = document.getElementById("lb");
+      return !!lb && getComputedStyle(lb).display !== "none";
+    }
+    ["gesturestart", "gesturechange", "gestureend"].forEach(function (type) {
+      document.addEventListener(type, function (e) {
+        if (!lightboxOpen()) { e.preventDefault(); }
+      }, { passive: false });
+    });
+    // ダブルタップ。300ms 以内かつ 30px 以内の同じ場所のときだけ2回目を潰す。
+    var lastEnd = 0, lastX = -999, lastY = -999;
+    document.addEventListener("touchend", function (e) {
+      var now = Date.now();
+      var t = e.changedTouches && e.changedTouches[0];
+      var x = t ? t.clientX : 0, y = t ? t.clientY : 0;
+      if (now - lastEnd <= 300 && Math.abs(x - lastX) < 30 && Math.abs(y - lastY) < 30 && !lightboxOpen()) {
+        e.preventDefault();
+      }
+      lastEnd = now; lastX = x; lastY = y;
+    }, { passive: false });
+  })();
+  </script>
+  {% block scripts %}{% endblock %}
+</body>
+</html>

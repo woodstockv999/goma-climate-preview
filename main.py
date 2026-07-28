@@ -79,7 +79,7 @@ def _last_hour(ctx, d: date) -> int:
 
 
 UI_COOKIE = "goma_ui"
-UI_CHOICES = ("v2", "v3")
+UI_CHOICES = ("v2", "v3", "v4")
 
 
 def _pick_ui(request: Request) -> str:
@@ -122,14 +122,15 @@ class ClimateTemplates(Jinja2Templates):
                 ctx["climate_error"] = str(e)
             ctx["ui"] = ui
 
-        if ui == "v3":
+        if ui != "v2":
+            suffix = "_%s.html" % ui
             args = tuple(
-                a.replace("_v2.html", "_v3.html") if isinstance(a, str) and a.endswith("_v2.html") else a
+                a.replace("_v2.html", suffix) if isinstance(a, str) and a.endswith("_v2.html") else a
                 for a in args
             )
             name = kwargs.get("name")
             if isinstance(name, str) and name.endswith("_v2.html"):
-                kwargs["name"] = name.replace("_v2.html", "_v3.html")
+                kwargs["name"] = name.replace("_v2.html", suffix)
 
         response = super().TemplateResponse(*args, **kwargs)
         if request is not None and request.query_params.get("ui") in UI_CHOICES:

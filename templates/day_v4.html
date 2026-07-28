@@ -1,0 +1,474 @@
+{% extends "base_v4.html" %}
+
+{% block title %}{{ date_str }} — ごまモニター{% endblock %}
+
+{% block nav %}
+<a class="nav-back" href="{{ base }}/?ui=v4">一覧</a>
+<span class="nav-aside">{{ date_display }}</span>
+{% endblock %}
+
+{% block head %}
+<style>
+  /* ── 扉 ───────────────────────────────────
+     日別詳細は写真より先に「その日の文章」を置く。
+     日記は本来この画面の主役なので、囲わず、地の黒の上に大きく組む。 */
+  .door { padding: 7rem 0 1rem; }
+  .door-kicker {
+    font-size: 0.64rem; letter-spacing: 0.3em; color: var(--ink-3); margin-bottom: 1.4rem;
+  }
+  .door-date {
+    font-family: var(--serif); font-weight: 800;
+    font-size: clamp(2.6rem, 13vw, 4rem); line-height: 1.05; letter-spacing: 0.03em;
+    font-variant-numeric: tabular-nums;
+  }
+  .door-date small { font-size: 0.36em; font-weight: 400; color: var(--ink-2); margin: 0 0.15em; }
+  .diary {
+    margin-top: 2.4rem;
+    font-family: var(--serif); font-weight: 400;
+    font-size: 1.22rem; line-height: 2.3; letter-spacing: 0.06em; color: var(--ink);
+  }
+  .diary-none { margin-top: 2.4rem; font-size: 0.82rem; letter-spacing: 0.14em; color: var(--ink-3); }
+
+  .facts {
+    display: flex; gap: 2.6rem; flex-wrap: wrap;
+    margin-top: 3rem; padding-top: 1.6rem; border-top: 1px solid var(--hairline);
+  }
+  .fact .v {
+    font-family: var(--serif); font-weight: 800; font-size: 2.1rem; line-height: 1;
+    font-variant-numeric: tabular-nums;
+  }
+  .fact .v small { font-size: 0.42em; font-weight: 400; color: var(--ink-3); margin-left: 0.15em; }
+  .fact .k { margin-top: 0.5rem; font-size: 0.62rem; letter-spacing: 0.24em; color: var(--ink-3); }
+  .fact.bad .v { color: var(--t-warn); }
+
+  /* ── 行動内訳 ───────────────────────────── */
+  .bar { display: flex; height: 4px; gap: 1px; }
+  .bar .sleeping { background: var(--c-sleeping); }
+  .bar .active   { background: var(--c-active); }
+  .bar .walking  { background: var(--c-walking); }
+  .bar .playing  { background: var(--c-playing); }
+  .bar .drinking { background: var(--c-drinking); }
+  .bar .sitting  { background: var(--c-sitting); }
+  .bar .absent   { background: var(--c-absent); }
+  .bar .unknown  { background: var(--c-unknown); }
+  .breakdown {
+    display: flex; flex-wrap: wrap; gap: 0.5rem 1.5rem; margin-top: 1.3rem;
+    font-size: 0.74rem; color: var(--ink-2); letter-spacing: 0.05em;
+  }
+  .breakdown b { color: var(--ink); font-weight: 400; font-variant-numeric: tabular-nums; }
+
+  /* ── 線グラフ ───────────────────────────
+     文字盤と同じ室温をもう一度、こんどは直線の時間軸で見る。
+     重複だが、丸い図は形を掴むため、線の図は値を読むため。役割が違う。 */
+  .charts { display: flex; flex-direction: column; gap: 2rem; }
+  .chart-head {
+    display: flex; align-items: baseline; gap: 0.6rem; margin-bottom: 0.5rem;
+    font-size: 0.64rem; letter-spacing: 0.22em; color: var(--ink-3);
+  }
+  .chart-head .v { margin-left: auto; letter-spacing: 0.08em; color: var(--ink-2); font-variant-numeric: tabular-nums; }
+  .stale-note {
+    font-size: 0.76rem; line-height: 1.8; color: var(--ink-2); letter-spacing: 0.05em;
+    border-left: 1px solid var(--t-crit); padding: 0.2rem 0 0.2rem 0.9rem; margin-bottom: 1.6rem;
+  }
+  .stale-note b { color: var(--ink); font-weight: 400; }
+
+  /* ── 時刻ごとの記録 ─────────────────────── */
+  .events { display: flex; flex-direction: column; gap: 2.3rem; }
+  .ev-mark {
+    display: flex; align-items: center; gap: 0.9rem; margin-bottom: 0.9rem;
+    font-size: 0.66rem; letter-spacing: 0.16em; color: var(--ink-2);
+    font-variant-numeric: tabular-nums;
+  }
+  .ev-mark .rule { flex: 1; height: 1px; background: var(--hairline); }
+  .ev-mark .temp { color: var(--ink-3); letter-spacing: 0.08em; display: inline-flex; align-items: center; gap: 0.35rem; }
+  .ev-mark .temp i { width: 5px; height: 5px; border-radius: 50%; display: block; }
+  .ev-mark .temp i.warn { background: var(--t-warn); }
+  .ev-mark .temp i.crit { background: var(--t-crit); }
+  .ev-mark .temp.crit { color: var(--t-crit); }
+  .ev-photo { width: 100%; aspect-ratio: 16/9; background: #000; overflow: hidden; cursor: zoom-in; }
+  .ev-photo.compact { aspect-ratio: 21/9; }
+  .ev-photo img {
+    width: 100%; height: 100%; object-fit: cover; object-position: 20% center; display: block;
+    transition: transform 1.2s cubic-bezier(0.16, 1, 0.3, 1);
+  }
+  .ev-photo:hover img { transform: scale(1.03); }
+  .ev-desc {
+    margin-top: 1.1rem; font-family: var(--serif); font-weight: 400;
+    font-size: 1.02rem; line-height: 1.95; letter-spacing: 0.05em; color: var(--ink);
+  }
+  .ev-acts {
+    margin-top: 1rem; display: flex; align-items: center; gap: 0.6rem; flex-wrap: wrap;
+  }
+  .vote { font-size: 0.6rem; letter-spacing: 0.14em; color: var(--ink-3); margin-right: auto; }
+  .ev-quiet { font-size: 0.72rem; letter-spacing: 0.16em; color: var(--ink-3); }
+  .ev-quiet.bad { color: var(--t-warn); }
+
+  /* ── モーダル ───────────────────────────── */
+  #edit-modal {
+    display: none; position: fixed; inset: 0; z-index: 1100; padding: 22px;
+    background: rgba(0,0,0,0.82); align-items: center; justify-content: center;
+    -webkit-backdrop-filter: blur(6px); backdrop-filter: blur(6px);
+  }
+  #edit-modal.open { display: flex; }
+  .sheet {
+    background: var(--bg-2); border: 1px solid var(--hairline);
+    padding: 2rem 1.8rem 1.6rem; width: min(100%, 400px);
+    display: flex; flex-direction: column; gap: 1.4rem;
+  }
+  .sheet h3 { font-family: var(--serif); font-weight: 800; font-size: 1.15rem; letter-spacing: 0.1em; }
+  .field { display: flex; flex-direction: column; gap: 0.5rem; }
+  .field label { font-size: 0.6rem; letter-spacing: 0.24em; color: var(--ink-3); }
+  /* 17px を割ると iOS がフォーカス時に勝手にズームする */
+  .field select, .field input[type="text"] {
+    font: inherit; font-size: 17px; padding: 0.7rem 0.8rem;
+    border: 1px solid var(--hairline); background: var(--bg);
+    color: var(--ink); width: 100%; border-radius: 0; -webkit-appearance: none;
+  }
+  .field select { -webkit-appearance: menulist; }
+  .field input:focus, .field select:focus { outline: none; border-color: var(--ember); }
+  .sheet-actions { display: flex; gap: 0.7rem; justify-content: flex-end; }
+</style>
+{% endblock %}
+
+{% block content %}
+
+<div id="lb" onclick="this.style.display='none'"><img id="lb-img" alt="スナップショット拡大"></div>
+
+<div id="edit-modal" onclick="if(event.target===this)closeEditModal()">
+  <div class="sheet">
+    <h3>ラベルを見直す</h3>
+    <div class="field">
+      <label>LABEL</label>
+      <select id="edit-label" onchange="applyLabelDesc()">
+        <option value="sleeping">睡眠中</option>
+        <option value="active">活動中</option>
+        <option value="sitting">お座り中</option>
+        <option value="walking">歩き中</option>
+        <option value="playing">遊び中</option>
+        <option value="drinking">飲水中</option>
+        <option value="absent">お出かけ中</option>
+        <option value="unknown">不明</option>
+      </select>
+    </div>
+    <div class="field">
+      <label>DESCRIPTION</label>
+      <input type="text" id="edit-desc" maxlength="200" placeholder="ケージで丸まって寝ているごま">
+    </div>
+    <div class="sheet-actions">
+      <button class="btn btn-sm" onclick="closeEditModal()">やめる</button>
+      <button class="btn btn-sm" id="edit-save-btn" onclick="saveEdit()">保存</button>
+    </div>
+  </div>
+</div>
+
+<!-- ── 扉 ───────────────────────────────────── -->
+<section class="door">
+  <div class="door-kicker line-mask"><span>ごまの日記</span></div>
+  <h1 class="door-date line-mask" style="--d:0.12s"><span>{{ date_str[5:7]|int }}<small>月</small>{{ date_str[8:10]|int }}<small>日</small></span></h1>
+  {% if diary_content %}
+  <p class="diary reveal" style="--d:0.35s">{{ diary_content }}</p>
+  {% elif diary_pending %}
+  <p class="diary-none reveal" style="--d:0.35s">毎日23時過ぎに日記を書きます</p>
+  {% else %}
+  <p class="diary-none reveal" style="--d:0.35s">この日の日記はまだありません</p>
+  {% endif %}
+  <div class="facts reveal" style="--d:0.45s">
+    <div class="fact"><div class="v">{{ summary.hours_present }}<small>h</small></div><div class="k">在宅</div></div>
+    <div class="fact"><div class="v">{{ summary.snapshot_count }}<small>枚</small></div><div class="k">記録</div></div>
+    {% if summary.gap_count > 0 %}
+    <div class="fact bad"><div class="v">{{ summary.gap_count }}</div><div class="k">取得エラー</div></div>
+    {% endif %}
+  </div>
+</section>
+
+<!-- ── 文字盤 ────────────────────────────────── -->
+{% if timeline %}
+<section class="sec">
+  <div class="sec-head reveal">
+    <h2 class="h-sec">この日の24時間</h2>
+    <span class="aside">行動と室温</span>
+  </div>
+  <div class="dial-wrap reveal" style="--d:0.1s">
+    <svg class="dial" id="dial" viewBox="0 0 300 300" role="img"
+         aria-label="24時間の文字盤。外周が行動、内側の軌道が室温。{% if climate_summary %}最高{{ climate_summary.t_max }}℃、最低{{ climate_summary.t_min }}℃。{% endif %}"></svg>
+    {% if climate_summary %}
+    {% set tmax = climate_summary.t_max %}
+    {% set tcls = 'crit' if tmax >= 28 else ('warn' if tmax >= 26 else ('ok' if tmax >= 20 else 'cold')) %}
+    <div class="dial-read {{ tcls }}" id="dial-read"
+         data-when="この日の最高"
+         data-temp="{{ tmax }}"
+         data-alt="記録なし"
+         data-st="{{ '危険' if tcls == 'crit' else ('注意' if tcls == 'warn' else ('快適' if tcls == 'ok' else '寒い')) }}"
+         data-sub="最低 {{ climate_summary.t_min }}℃"
+         data-cls="{{ tcls }}">
+      <div class="when"></div><div class="t"></div><div class="st"></div><div class="sub"></div>
+    </div>
+    {% endif %}
+  </div>
+  <p class="dial-note reveal" style="--d:0.2s">
+    破線は28℃。軌道が外へふくらむほど暑い。文字盤に触れるとその時刻を表示
+  </p>
+
+  <script type="application/json" id="dial-activity">[
+    {%- for e in timeline if e.type == "log" -%}
+    {"hour": {{ e.hour }}, "label": "{{ e.activity_label or 'unknown' }}", "label_ja": "{{ e.activity_label_ja }}"}{{ "," if not loop.last }}
+    {%- endfor -%}
+  ]</script>
+  {% if climate_series %}
+  <script type="application/json" id="climate-data">{{ climate_series | tojson }}</script>
+  {% endif %}
+</section>
+{% endif %}
+
+<!-- ── 行動内訳 ──────────────────────────────── -->
+{% if summary.label_counts %}
+<section class="sec">
+  <div class="sec-head reveal"><h2 class="h-sec">行動内訳</h2></div>
+  <div class="bar reveal" style="--d:0.1s">
+    {% for label, (count, label_ja) in summary.label_counts.items() %}
+    <div class="{{ label }}" style="flex: {{ count }};" title="{{ label_ja }} {{ count }}h"></div>
+    {% endfor %}
+  </div>
+  <div class="breakdown reveal" style="--d:0.15s">
+    {% for label, (count, label_ja) in summary.label_counts.items() %}
+    <span class="tag"><i class="dot {{ label }}"></i>{{ label_ja }} <b>{{ count }}h</b></span>
+    {% endfor %}
+  </div>
+</section>
+{% endif %}
+
+<!-- ── 線グラフ ──────────────────────────────── -->
+{% if climate and climate_series %}
+<section class="sec">
+  <div class="sec-head reveal">
+    <h2 class="h-sec">推移</h2>
+    <span class="aside">最高 {{ climate_summary.t_max }}℃ ／ 最低 {{ climate_summary.t_min }}℃</span>
+  </div>
+  {% if climate.temp is none %}
+  <div class="stale-note reveal">
+    <b>{{ climate.age_hours }}時間 更新が止まっている。</b>電池切れの可能性。以下は停止前までの記録。
+  </div>
+  {% endif %}
+  <div class="charts">
+    <div class="reveal">
+      <div class="chart-head"><span>室温</span><span class="v">{{ climate_series[-1].temp }}℃</span></div>
+      <div class="chart-wrap">
+        <svg class="chart-svg" id="chart-temp" role="img"
+             aria-label="室温の推移。最高{{ climate_summary.t_max }}℃、最低{{ climate_summary.t_min }}℃。"></svg>
+        <div class="chart-tip" id="tip-temp"></div>
+      </div>
+    </div>
+    <div class="reveal" style="--d:0.1s">
+      <div class="chart-head"><span>湿度</span><span class="v">{{ climate_series[-1].hum }}%</span></div>
+      <div class="chart-wrap">
+        <svg class="chart-svg" id="chart-hum" role="img" aria-label="湿度の推移。"></svg>
+        <div class="chart-tip" id="tip-hum"></div>
+      </div>
+    </div>
+  </div>
+</section>
+{% endif %}
+
+<!-- ── 時刻ごとの記録 ─────────────────────────── -->
+<section class="sec">
+  <div class="sec-head reveal"><h2 class="h-sec">時刻ごとの記録</h2></div>
+  <div class="events">
+    {% for entry in timeline %}
+    {% if entry.type == "log" %}
+      {% set img_url = (base + '/image/' + entry.media_path) if entry.media_path else "" %}
+      <div class="ev reveal" data-log-id="{{ entry.id }}">
+        <div class="ev-mark">
+          <span>{{ "%02d"|format(entry.hour) }}:00</span>
+          <span class="tag ev-tag"><i class="dot {{ entry.activity_label }}"></i>{{ entry.activity_label_ja }}</span>
+          <i class="rule"></i>
+          {% if entry.climate %}
+          <span class="temp {{ 'crit' if entry.climate.status == 'crit' else '' }}">
+            {%- if entry.climate.status in ('warn', 'crit') %}<i class="{{ entry.climate.status }}"></i>{% endif -%}
+            {{ entry.climate.temp }}℃ / {{ entry.climate.hum }}%
+          </span>
+          {% endif %}
+        </div>
+        {% if entry.media_path %}
+        <div class="ev-photo{% if entry.activity_label == 'sleeping' or entry.decided_by == "opus_override" %} compact{% endif %}"
+             onclick="openLightbox('{{ img_url }}')">
+          <img loading="lazy" src="{{ img_url }}" alt="{{ entry.hour }}時のスナップショット">
+        </div>
+        {% endif %}
+        {% if entry.description %}<p class="ev-desc">{{ entry.description }}</p>{% endif %}
+        <div class="ev-acts">
+          {% if entry.decided_by == "flash" and entry.vote_total %}
+          <span class="vote" title="Flash {{ entry.vote_total }}票中 {{ entry.vote_agree }}票一致">FLASH {{ entry.vote_agree }}/{{ entry.vote_total }}</span>
+          {% elif entry.decided_by == "pro" %}
+          <span class="vote" title="{% if entry.vote_total %}Flashの票が割れたため（{{ entry.vote_total }}票中一致せず）Proが判定{% else %}Flashが全滅したためProが判定{% endif %}">PRO 判定</span>
+          {% elif entry.decided_by == "opus_override" %}
+          <span class="vote" title="Geminiの在宅判定をOpusが覆しました">OPUS 補正</span>
+          {% else %}
+          <span class="vote"></span>
+          {% endif %}
+          <button class="btn btn-sm"
+                  data-label="{{ entry.activity_label or 'unknown' }}"
+                  data-desc="{{ entry.description or '' }}"
+                  onclick="openEditModal({{ entry.id }}, this.dataset.label, this.dataset.desc)">見直す</button>
+          <button class="btn btn-sm" onclick="reanalyze(this, {{ entry.id }})">再分析</button>
+        </div>
+      </div>
+    {% else %}
+      <div class="ev reveal">
+        <div class="ev-mark">
+          <span>{{ "%02d"|format(entry.hour) }}:00</span>
+          <i class="rule"></i>
+        </div>
+        <p class="ev-quiet{% if entry.type == 'gap' %} bad{% endif %}">
+          {%- if entry.type == "gap" %}取得エラー{% elif entry.type == "future" %}まだ未来の時間帯です{% else %}データなし{% endif -%}
+        </p>
+      </div>
+    {% endif %}
+    {% endfor %}
+  </div>
+</section>
+{% endblock %}
+
+{% block scripts %}
+<script>
+let _editLogId = null;
+
+// 「見直す」でラベルを選んだときに入れる定型の説明文。
+// ラベル変更のたびに必ず入れ替える。既存の説明文（Gemini が書いた文）は
+// 全記録に入っているので、「空欄のときだけ」等の条件を付けると一度も発動しない。
+//
+// 文面は prompt.md の description 規約に揃えること:
+//   「必ず『ごま』という名前を含め、少し自由で可愛らしい一言」
+const LABEL_DESC = {
+  sleeping: 'ごまはスヤスヤおやすみ中です',
+  active:   'ごまはパッチリ起きています',
+  sitting:  'ごまはまったりくつろぎ中です',
+  walking:  'ごまはトコトコ移動中です',
+  playing:  'ごまは元気にあそんでいます',
+  drinking: 'ごまはおみずを飲んでいます',
+  absent:   'ごまはどこかへお出かけ中です',
+  unknown:  'ごまの様子がよく見えません',
+};
+
+function applyLabelDesc() {
+  const label = document.getElementById('edit-label').value;
+  document.getElementById('edit-desc').value = LABEL_DESC[label] || '';
+}
+
+function openLightbox(src) {
+  document.getElementById('lb-img').src = src;
+  document.getElementById('lb').style.display = 'flex';
+}
+
+function openEditModal(logId, currentLabel, currentDesc) {
+  _editLogId = logId;
+  document.getElementById('edit-label').value = currentLabel || 'unknown';
+  document.getElementById('edit-desc').value = currentDesc || '';
+  document.getElementById('edit-modal').classList.add('open');
+  setTimeout(() => document.getElementById('edit-desc').focus(), 50);
+}
+
+function closeEditModal() {
+  document.getElementById('edit-modal').classList.remove('open');
+  _editLogId = null;
+}
+
+function paintTag(row, label, labelJa) {
+  const tagEl = row.querySelector('.ev-tag');
+  if (!tagEl) return;
+  tagEl.textContent = '';
+  const i = document.createElement('i');
+  i.className = `dot ${label}`;
+  tagEl.appendChild(i);
+  tagEl.appendChild(document.createTextNode(labelJa));
+}
+
+async function saveEdit() {
+  if (!_editLogId) return;
+  const label = document.getElementById('edit-label').value;
+  const desc = document.getElementById('edit-desc').value;
+  const saveBtn = document.getElementById('edit-save-btn');
+  saveBtn.disabled = true; saveBtn.textContent = '保存中';
+  try {
+    const res = await fetch(`{{ base }}/api/log/${_editLogId}`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ activity_label: label, description: desc }),
+    });
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({}));
+      throw new Error(err.detail || `HTTP ${res.status}`);
+    }
+    const data = await res.json();
+    const row = document.querySelector(`.ev[data-log-id="${_editLogId}"]`);
+    if (row) {
+      paintTag(row, data.activity_label, data.activity_label_ja);
+      const editBtn = row.querySelector('.btn[data-label]');
+      if (editBtn) { editBtn.dataset.label = data.activity_label; editBtn.dataset.desc = data.description; }
+      const voteEl = row.querySelector('.vote');
+      if (voteEl) voteEl.textContent = '';
+      let descEl = row.querySelector('.ev-desc');
+      if (data.description) {
+        if (descEl) descEl.textContent = data.description;
+        else {
+          const p = document.createElement('p');
+          p.className = 'ev-desc';
+          p.textContent = data.description;
+          row.insertBefore(p, row.querySelector('.ev-acts'));
+        }
+      }
+    }
+    closeEditModal();
+  } catch (e) {
+    alert(`保存失敗: ${e.message}`);
+  } finally {
+    saveBtn.disabled = false; saveBtn.textContent = '保存';
+  }
+}
+
+async function reanalyze(btn, logId) {
+  btn.disabled = true; btn.textContent = '分析中';
+  try {
+    const res = await fetch(`{{ base }}/api/reanalyze/${logId}`, { method: 'POST' });
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({}));
+      throw new Error(err.detail || `HTTP ${res.status}`);
+    }
+    const data = await res.json();
+    const row = btn.closest('.ev');
+    paintTag(row, data.activity_label, data.activity_label_ja);
+    const voteEl = row.querySelector('.vote');
+    if (voteEl) {
+      if (data.decided_by === 'flash' && data.vote_total) {
+        voteEl.title = `Flash ${data.vote_total}票中 ${data.vote_agree}票一致`;
+        voteEl.textContent = `FLASH ${data.vote_agree}/${data.vote_total}`;
+      } else if (data.decided_by === 'pro') {
+        voteEl.title = data.vote_total
+          ? `Flashの票が割れたため（${data.vote_total}票中一致せず）Proが判定`
+          : 'Flashが全滅したためProが判定';
+        voteEl.textContent = 'PRO 判定';
+      } else if (data.decided_by === 'opus_override') {
+        voteEl.title = 'Geminiの在宅判定をOpusが覆しました';
+        voteEl.textContent = 'OPUS 補正';
+      } else {
+        voteEl.textContent = '';
+      }
+    }
+    const descEl = row.querySelector('.ev-desc');
+    if (data.description && descEl) descEl.textContent = data.description;
+    btn.textContent = '完了';
+    setTimeout(() => { btn.textContent = '再分析'; btn.disabled = false; }, 2000);
+  } catch (e) {
+    btn.textContent = 'エラー';
+    alert(`再分析失敗: ${e.message}`);
+    setTimeout(() => { btn.textContent = '再分析'; btn.disabled = false; }, 2000);
+  }
+}
+
+document.addEventListener('keydown', e => {
+  if (e.key === 'Escape') {
+    document.getElementById('lb').style.display = 'none';
+    closeEditModal();
+  }
+});
+</script>
+{% endblock %}
