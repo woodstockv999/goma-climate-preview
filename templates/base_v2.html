@@ -246,7 +246,10 @@
     .thresh-text { fill: var(--t-crit); font-size: 8.5px; font-weight: 700; }
     .series-line { fill: none; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
     .end-dot { stroke: var(--surface); stroke-width: 2; }
-    .cross-line { stroke: var(--text); stroke-width: 1; opacity: 0.35; }
+    /* opacity をここで指定してはいけない。CSS は presentation attribute に勝つので、
+       JS の setAttribute("opacity","0") が無効化され、初期位置 x=0（左端）に
+       縦線が出たままになる。表示・非表示は JS 側の属性だけで制御する。 */
+    .cross-line { stroke: var(--text); stroke-width: 1; }
     .chart-tip {
       position: absolute; pointer-events: none; background: var(--charcoal); color: #fff;
       font-size: 0.7rem; font-weight: 700; padding: 0.22rem 0.5rem; border-radius: 6px;
@@ -432,7 +435,7 @@
         if (i < 0) { i = 0; }
         if (i > last) { i = last; }
         var cx = X(i), cy = Y(vals[i]);
-        cross.setAttribute("x1", cx); cross.setAttribute("x2", cx); cross.setAttribute("opacity", "1");
+        cross.setAttribute("x1", cx); cross.setAttribute("x2", cx); cross.setAttribute("opacity", "0.35");
         hdot.setAttribute("cx", cx); hdot.setAttribute("cy", cy); hdot.setAttribute("opacity", "1");
         // 先に文面を入れてから幅を測る（幅が確定しないとクランプできない）
         tip.textContent = SERIES[i].hour + ":00　" + vals[i] + unit;
@@ -474,11 +477,29 @@
       var lb = document.getElementById("lb");
       return !!lb && getComputedStyle(lb).display !== "none";
     }
+    // ピンチズーム
     ["gesturestart", "gesturechange", "gestureend"].forEach(function (type) {
       document.addEventListener(type, function (e) {
         if (!lightboxOpen()) { e.preventDefault(); }
       }, { passive: false });
     });
+
+    // ダブルタップ拡大。touch-action:manipulation だけでは iOS が取りこぼすので、
+    // 2回目のタップを直接潰す。誤爆を避けるため「300ms 以内」かつ
+    // 「30px 以内の同じ場所」の2条件が揃ったときだけ抑止する
+    // （別々のボタンを素早く連打した場合は通す）。
+    var lastEnd = 0, lastX = -999, lastY = -999;
+    document.addEventListener("touchend", function (e) {
+      var now = Date.now();
+      var t = e.changedTouches && e.changedTouches[0];
+      var x = t ? t.clientX : 0;
+      var y = t ? t.clientY : 0;
+      var samePlace = Math.abs(x - lastX) < 30 && Math.abs(y - lastY) < 30;
+      if (now - lastEnd <= 300 && samePlace && !lightboxOpen()) {
+        e.preventDefault();
+      }
+      lastEnd = now; lastX = x; lastY = y;
+    }, { passive: false });
   })();
   </script>
 </body>
