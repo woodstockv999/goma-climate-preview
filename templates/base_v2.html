@@ -185,10 +185,16 @@
     }
     .spark-head {
       display: flex; align-items: baseline; justify-content: space-between;
+      flex-wrap: wrap; gap: 0.1rem 0.6rem;
       font-size: 0.66rem; color: var(--muted);
       padding: 0 0.6rem; margin-bottom: 0.15rem;
     }
     .spark-head b { color: var(--text); font-size: 0.74rem; font-variant-numeric: tabular-nums; }
+    /* 危険ラインの凡例。破線の見本を出すことで、図中の点線が何なのかを言葉で示す */
+    .thresh-key {
+      display: inline-block; width: 13px; height: 0; vertical-align: middle;
+      border-top: 2px dashed var(--t-crit); margin: 0 4px 0 6px;
+    }
     .spark { display: block; width: 100%; height: auto; }
 
     /* 一覧の最高室温（トップ） */
@@ -339,9 +345,8 @@
         cx: sx(n - 1), cy: sy(lastC.temp), r: 3,
         fill: lastC.temp >= 28 ? C.crit : C.ok, stroke: "#fff", "stroke-width": 1.5
       }));
-      var lb = el("text", { x: W - 2, y: sy(28) - 2.5, class: "thresh-text", "text-anchor": "end" });
-      lb.textContent = "28℃";
-      f.appendChild(lb);
+      // 閾値ラベルは図内に置かない。高さ40単位に対して文字が大きく、折れ線と重なる。
+      // 意味（何の線か）も伝わらないので、見出しの凡例に出している。
       spark.appendChild(f);
     }
 
