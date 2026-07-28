@@ -97,11 +97,19 @@ CLIMATE_CSS = """
       padding: 0 0.6rem; margin-bottom: 0.15rem;
     }
     .spark-head b { color: var(--text); font-size: 0.74rem; font-variant-numeric: tabular-nums; }
-    /* 危険ラインの凡例。破線の見本を出すことで、図中の点線が何なのかを言葉で示す */
+    /* 閾値ラインの凡例。破線の見本を出すことで、図中の点線が何なのかを言葉で示す */
     .thresh-key {
       display: inline-block; width: 13px; height: 0; vertical-align: middle;
-      border-top: 2px dashed var(--t-crit); margin: 0 4px 0 6px;
+      border-top: 2px dashed var(--t-warn); margin: 0 4px 0 6px;
     }
+    /* 3時間ごとに折れ線へ直接置く値。縦軸の目盛りより、この高さが何℃かを
+       直接読ませる方が小さい図には向く（軸を作ると横位置もずれる） */
+    .spark-val {
+      fill: var(--muted); font-size: 6.5px; font-weight: 700;
+      font-variant-numeric: tabular-nums;
+    }
+    .spark-val.warn { fill: var(--t-warn); }
+    .spark-val.crit { fill: var(--t-crit); }
     .spark { display: block; width: 100%; height: auto; }
     /* スパークラインは viewBox 幅240を約344pxへ拡大表示するため、日別詳細のグラフ
        （340→ほぼ等倍）と同じ stroke-width でも約1.4倍太く描かれてしまう。
@@ -131,6 +139,41 @@ CLIMATE_CSS = """
       font-size: 0.76rem; line-height: 1.55; padding: 0.5rem 0.6rem;
       border-radius: 10px; margin-bottom: 0.55rem;
       background: #f1f0ef; border: 1px solid #ddd9d5; color: #4a443f;
+    }
+
+    /* 日別詳細の行動内訳。割合で引き伸ばす棒は時間軸を持たないので、真下の室温グラフと
+       時刻が対応しない（「12時に暑かった時、何をしていたか」が読めない）。
+       トップと同じ24枠の時間割に置き換え、**グラフの作図領域と横位置を厳密に揃える**。
+       左右の padding はグラフの pL/pR（26/340・10/340）と同じ割合。
+       .chart-card の内側に置くことで、この % が SVG の幅と同じ基準で解決される。 */
+    /* ストリップはカードに入れない（カードの中にカードが入って見える）。
+       それでもグラフと横位置を揃えるため、**.chart-card と同じ箱を透明で被せる**。
+       ★数値（1.5px + 0.3rem）で足してはいけない: border-width はブラウザが
+       デバイスピクセルへ丸めるので（1.5px 指定が dsf=1 では 1px になる）、
+       同じ指定を持たせて同じ丸めを受けさせるのが唯一ずれない方法。 */
+    .act-plot { border: 1.5px solid transparent; padding: 0 0.3rem; }
+    /* この % は .act-plot の内容幅＝SVG の幅に対して解決される */
+    .act-strip, .act-axis { margin-left: 7.647%; margin-right: 2.941%; } /* = pL/pR (26,10)/340 */
+    /* ★左右の padding は gap の半分（1px）。等間隔にするとはそういうことで、
+       2px にすると枠の中央がグラフの点から最大1pxずれる */
+    .act-strip {
+      display: flex; height: 36px; gap: 2px; padding: 2px 1px;
+      border-radius: 10px; overflow: hidden; background: var(--border-2);
+    }
+    .act-slot { flex: 1; border-radius: 5px; background: var(--border); }
+    .act-slot.sleeping { background: var(--c-sleeping); }
+    .act-slot.active   { background: var(--c-active); }
+    .act-slot.walking  { background: var(--c-walking); }
+    .act-slot.playing  { background: var(--c-playing); }
+    .act-slot.drinking { background: var(--c-drinking); }
+    .act-slot.sitting  { background: var(--c-sitting); }
+    .act-slot.absent   { background: var(--c-absent); }
+    .act-slot.unknown  { background: var(--c-unknown); }
+    /* 時刻の目盛り。グラフと同じ位置（0/6/12/18/24時の境界）に置く */
+    .act-axis { position: relative; height: 13px; margin-top: 3px; }
+    .act-axis span {
+      position: absolute; top: 0; font-size: 0.62rem; color: var(--muted);
+      font-variant-numeric: tabular-nums; white-space: nowrap;
     }
 
     /* 「室温」見出しの右に測定時刻。2枚のグラフで共通なので、カードごとに
@@ -230,7 +273,9 @@ CLIMATE_JS = """
     var SERIES = JSON.parse(node.textContent || "[]");
     if (!SERIES.length) { return; }
     var NS = "http://www.w3.org/2000/svg";
-    var C = { ok: "#2b9873", crit: "#a82815", hum: "#3a9fd4" };
+    var C = { ok: "#2b9873", warn: "#c67610", crit: "#a82815", hum: "#3a9fd4" };
+    // 室温ステータスと同じ区切り。図の帯（26℃橙・28℃赤）と線の色を必ず一致させる
+    var level = function (t) { return t >= 28 ? "crit" : (t >= 26 ? "warn" : "ok"); };
 
     function el(n, a) {
       var e = document.createElementNS(NS, n);
@@ -241,23 +286,41 @@ CLIMATE_JS = """
     /* ── トップ: 行動ストリップと同じ時間軸のスパークライン ── */
     var spark = document.getElementById("spark");
     if (spark) {
-      var n = SERIES.length, W = n * 10, H = 40, pT = 5, pB = 3, ih = H - pT - pB;
+      // ★縦軸は作らない。左に軸の余白を取ると折れ線が右へずれて、真上の24hストリップ
+      //   との1対1の対応が壊れる——縦に見て「暑い時間帯に何をしていたか」を読ませるのが
+      //   この図の存在意義なので横位置は動かせない。代わりに3時間ごとの値を線上に直接置く。
+      var n = SERIES.length, W = n * 10;
+      var pT = 11, pB = 6, H = 48;
+      var ih = H - pT - pB;
       spark.setAttribute("viewBox", "0 0 " + W + " " + H);
-      var lo = 22, hi = 34;
+      // 日別詳細のグラフと同じ 22〜28℃・同じ広げ方（違う目盛りだと2つの図が食い違う）
+      var lo = 22, hi = 28;
+      SERIES.forEach(function (c) {
+        if (!c) { return; }
+        if (c.temp > hi) { hi = Math.ceil(c.temp / 2) * 2; }
+        if (c.temp < lo) { lo = Math.floor(c.temp / 2) * 2; }
+      });
       var sx = function (i) { return i * 10 + 5; };
       var sy = function (v) { return pT + ih - ((v - lo) / (hi - lo)) * ih; };
       var f = document.createDocumentFragment();
-      f.appendChild(el("rect", { x: 0, y: pT, width: W, height: Math.max(0, sy(28) - pT), class: "band-crit" }));
-      f.appendChild(el("line", { x1: 0, y1: sy(28), x2: W, y2: sy(28), class: "thresh-line" }));
+      [{ v: 26, cls: "warn" }, { v: 28, cls: "crit" }].forEach(function (th) {
+        if (th.v >= hi) { return; }
+        f.appendChild(el("rect", {
+          x: 0, y: pT, width: W, height: Math.max(0, sy(th.v) - pT), class: "band-" + th.cls
+        }));
+        f.appendChild(el("line", {
+          x1: 0, y1: sy(th.v), x2: W, y2: sy(th.v), class: "thresh-line " + th.cls
+        }));
+      });
       // SERIES はストリップの枠と1対1で、記録の無い時間は null が入っている。
       // null は飛ばすのではなく線を切る（繋ぐと、計測していない時間帯を
       // 計測していたように見せてしまう）。
       var segs = [], cur = null;
       SERIES.forEach(function (c, i) {
         if (!c) { if (cur) { segs.push(cur); cur = null; } return; }
-        var hot = c.temp >= 28, pt = [sx(i), sy(c.temp)];
-        if (!cur) { cur = { hot: hot, pts: [pt] }; }
-        else if (cur.hot !== hot) { cur.pts.push(pt); segs.push(cur); cur = { hot: hot, pts: [pt] }; }
+        var lv = level(c.temp), pt = [sx(i), sy(c.temp)];
+        if (!cur) { cur = { lv: lv, pts: [pt] }; }
+        else if (cur.lv !== lv) { cur.pts.push(pt); segs.push(cur); cur = { lv: lv, pts: [pt] }; }
         else { cur.pts.push(pt); }
       });
       if (cur) { segs.push(cur); }
@@ -266,14 +329,14 @@ CLIMATE_JS = """
           // 前後が欠けた孤立点。線にならないので点で置く
           f.appendChild(el("circle", {
             cx: sg.pts[0][0], cy: sg.pts[0][1], r: 1.4,
-            fill: sg.hot ? C.crit : C.ok, stroke: "none"
+            fill: C[sg.lv], stroke: "none"
           }));
           return;
         }
         var d = sg.pts.map(function (p, k) {
           return (k ? "L" : "M") + p[0].toFixed(1) + " " + p[1].toFixed(1);
         }).join(" ");
-        f.appendChild(el("path", { d: d, class: "series-line", stroke: sg.hot ? C.crit : C.ok }));
+        f.appendChild(el("path", { d: d, class: "series-line", stroke: C[sg.lv] }));
       });
       var lastI = -1;
       for (var li = n - 1; li >= 0; li--) { if (SERIES[li]) { lastI = li; break; } }
@@ -282,10 +345,39 @@ CLIMATE_JS = """
       // r は viewBox 単位なので、線と違って non-scaling-stroke では細くならない。
       // 表示倍率（約1.43倍）を見込んで小さめに取る。ホバー対象ではないので
       // 最小ヒット領域の下限も気にしなくてよい。
-      f.appendChild(el("circle", {
-        cx: sx(lastI), cy: sy(lastC.temp), r: 1.8,
-        fill: lastC.temp >= 28 ? C.crit : C.ok, stroke: "#fff"
-      }));
+      // 3時間ごとの値を線上に直接置く。時刻そのもので選ぶので（i ではなく hour）、
+      // 24hの窓がどこから始まっても 0/3/6/9… の等間隔になる。
+      var marks = [];
+      for (var mi = 0; mi < n; mi++) {
+        if (SERIES[mi] && SERIES[mi].hour % 3 === 0) { marks.push(mi); }
+      }
+      // 直近の値は必ず出す。近すぎる3時間ラベルは重なるので落とす
+      marks = marks.filter(function (i) { return lastI - i >= 3; });
+      marks.push(lastI);
+
+      // 丸ポチを線に重ねる。数値だけだと「どの点の値か」が分からない。
+      // r は viewBox 単位なので、線と違って non-scaling-stroke では細くならない。
+      // 表示倍率（約1.43倍）を見込んで小さめに取る。
+      marks.forEach(function (i) {
+        var c = SERIES[i];
+        f.appendChild(el("circle", {
+          cx: sx(i), cy: sy(c.temp), r: i === lastI ? 1.9 : 1.6,
+          fill: C[level(c.temp)], stroke: "#fff"
+        }));
+      });
+      marks.forEach(function (i) {
+        var c = SERIES[i], x = sx(i), y = sy(c.temp);
+        // 上に置くのが基本。天井に近いときだけ下へ逃がす
+        var above = y - pT > 7;
+        var anchor = "middle";
+        if (x < 9) { anchor = "start"; } else if (x > W - 9) { anchor = "end"; }
+        var t = el("text", {
+          x: x, y: above ? y - 3.5 : y + 7,
+          class: "spark-val " + level(c.temp), "text-anchor": anchor
+        });
+        t.textContent = c.temp.toFixed(1);
+        f.appendChild(t);
+      });
       // 閾値ラベルは図内に置かない。高さ40単位に対して文字が大きく、折れ線と重なる。
       // 意味（何の線か）も伝わらないので、見出しの凡例に出している。
       spark.appendChild(f);
@@ -304,7 +396,12 @@ CLIMATE_JS = """
       //   配列の並び順を時刻とみなしてはいけない——合成データは必ず0時始まりだったので
       //   それで動いていたが、実測は途中から始まる。22時に設置した日、22時と23時の2点が
       //   「0時・1時」として全幅に引き伸ばされて描かれた。センサーが落ちた日も同じく崩れる。
-      var X = function (h) { return pL + (iw * h) / 23; };
+      //
+      //   目盛りは「t時ちょうど」の境界に、データ点は「h時台の中央」に置く。
+      //   こうすると上の行動ストリップ（24枠）の各枠の中央と一致し、縦に見て
+      //   「暑い時間帯に何をしていたか」が読める。
+      var XB = function (t) { return pL + (iw * t) / 24; };
+      var X = function (h) { return XB(h + 0.5); };
       var Y = function (v) { return pT + ih - ((v - lo) / (hi - lo)) * ih; };
 
       var pts = [];
@@ -355,12 +452,12 @@ CLIMATE_JS = """
         t.textContent = v + unit;
         f.appendChild(t);
       });
-      [0, 6, 12, 18, 23].forEach(function (h) {
+      [0, 6, 12, 18, 24].forEach(function (hh) {
         var t = el("text", {
-          x: X(h), y: H - 5, class: "axis-text",
-          "text-anchor": h === 0 ? "start" : (h === 23 ? "end" : "middle")
+          x: XB(hh), y: H - 5, class: "axis-text",
+          "text-anchor": hh === 0 ? "start" : (hh === 24 ? "end" : "middle")
         });
-        t.textContent = (h === 23 ? 24 : h) + "時";
+        t.textContent = hh + "時";
         f.appendChild(t);
       });
 
@@ -411,7 +508,7 @@ CLIMATE_JS = """
 
       function move(ev) {
         var r = svg.getBoundingClientRect();
-        var h = ((((ev.clientX - r.left) / r.width) * W) - pL) / iw * 23;
+        var h = ((((ev.clientX - r.left) / r.width) * W) - pL) / iw * 24 - 0.5;
         // 記録のある時刻へ吸着する。1.5時間以上離れていたら何も出さない
         // （記録の無い時間帯に、離れた時刻の値を出すと誤読させる）。
         var best = null, bestD = 1e9;
@@ -576,7 +673,7 @@ SPARK = """  <!-- 行動ストリップと同じ時間軸の室温 -->
   {% if strip_pts | length > 1 %}
   <div class="spark-card">
     <div class="spark-head">
-      <span>室温<i class="thresh-key"></i>28℃ 危険ライン</span>
+      <span>室温<i class="thresh-key"></i>26℃ 注意ライン</span>
       <span>最高 <b>{{ climate_summary.t_max }}℃</b>　最低 <b>{{ climate_summary.t_min }}℃</b></span>
     </div>
     <svg class="spark" id="spark" role="img"
@@ -613,6 +710,67 @@ patch("index_v2.html", [
 # ══════════════════════════════════════════════════════════════
 # 3) day_v2.html — 日別詳細ページ
 # ══════════════════════════════════════════════════════════════
+
+# 行動内訳を「割合で引き伸ばす棒」から「24枠の時間割」へ。
+# 棒は時間軸を持たないので、真下の室温グラフと時刻が対応しなかった。
+# markup を消すので、対応する CSS も同時に消す（死んだ CSS を残さない）。
+SUMMARY_BAR_CSS = """  .summary-bar {
+    display: flex;
+    height: 44px;
+    border-radius: 12px;
+    overflow: hidden;
+    margin-bottom: 0.6rem;
+    gap: 2px;
+  }
+  .bar-seg {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    overflow: hidden;
+    white-space: nowrap;
+    font-size: 0.65rem;
+    font-weight: 700;
+    color: rgba(255,255,255,0.9);
+    padding: 0 4px;
+    transition: flex 0.3s ease;
+  }
+  .bar-seg.sleeping  { background: var(--c-sleeping); }
+  .bar-seg.active    { background: var(--c-active); }
+  .bar-seg.walking   { background: var(--c-walking); }
+  .bar-seg.playing   { background: var(--c-playing); }
+  .bar-seg.drinking  { background: var(--c-drinking); }
+  .bar-seg.sitting   { background: var(--c-sitting); }
+  .bar-seg.absent    { background: var(--c-absent); color: #444; }
+  .bar-seg.unknown   { background: var(--c-unknown); color: #555; }
+
+"""
+
+SUMMARY_BAR = """  <div class="summary-bar">
+    {% for label, (count, label_ja) in summary.label_counts.items() %}
+    <div class="bar-seg {{ label }}" style="flex: {{ count }};" title="{{ label_ja }} {{ count }}h">
+      {% if count >= 2 %}<span>{{ label_ja }}</span>{% endif %}
+    </div>
+    {% endfor %}
+  </div>
+"""
+
+ACT_STRIP = """  <div class="act-plot">
+    <div class="act-strip">
+      {%- for e in timeline %}
+      {%- set lb = (e.activity_label or 'unknown') if e.type == 'log' else 'unrecorded' %}
+      <div class="act-slot {{ lb }}"
+           title="{{ '%02d'|format(e.hour) }}時 {{ e.activity_label_ja if e.type == 'log' else '記録なし' }}"></div>
+      {%- endfor %}
+    </div>
+    <div class="act-axis">
+      <span style="left:0">0時</span>
+      <span style="left:25%;transform:translateX(-50%)">6時</span>
+      <span style="left:50%;transform:translateX(-50%)">12時</span>
+      <span style="left:75%;transform:translateX(-50%)">18時</span>
+      <span style="right:0">24時</span>
+    </div>
+  </div>
+"""
 
 CLIMATE_BLOCK = """<!-- ── 室温（詳細ページはグラフ2枚のみ） ──────── -->
 {% if climate and climate_series %}
@@ -745,6 +903,9 @@ patch("day_v2.html", [
     # `confEl?.after()` が no-op になり DOM へ挿さらない。操作ボタンの親に入れる。
     ("      confEl?.after(voteEl);",
      "      row.querySelector('.btn-action')?.parentElement?.prepend(voteEl);", 1),
+    # 行動内訳を24枠の時間割へ差し替え（室温グラフと時刻を対応させる）
+    (SUMMARY_BAR, ACT_STRIP, 1),
+    (SUMMARY_BAR_CSS, "", 1),
     ("<!-- Timeline -->", CLIMATE_BLOCK + "<!-- Timeline -->", 1),
     # お出かけ中の金バッジを通常ピルに統一し、各行に室温を足す
     (OUTING_ANCHOR, ROW_BADGES, 1),
