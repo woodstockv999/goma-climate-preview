@@ -202,6 +202,34 @@ def series(d: _date, upto_hour: int = 23) -> list:
     return out
 
 
+def recent_hours(n: int = 24) -> list:
+    """直近n時間の毎時値。**記録の無い時間は None を入れて長さを保つ**。
+
+    トップの24hストリップ（現在時刻で終わる24枠）と1対1で並べるための形。
+    日付をまたぐので series() の「その日ぶん」では代用できない。
+    """
+    now = datetime.now(JST).replace(tzinfo=None, minute=0, second=0, microsecond=0)
+    start = now - timedelta(hours=n - 1)
+    rows = _rows(
+        "SELECT strftime('%Y-%m-%d %H', ts) AS k, AVG(temp_c), AVG(hum) "
+        "FROM climate_log WHERE ts >= ? GROUP BY k",
+        (start.isoformat(sep=" "),),
+    )
+    got = {k: (t, h) for k, t, h in rows}
+    out = []
+    for i in range(n):
+        d = start + timedelta(hours=i)
+        v = got.get(d.strftime("%Y-%m-%d %H"))
+        if v is None:
+            out.append(None)
+            continue
+        t = round(v[0], 1)
+        key, ja = temp_status(t)
+        out.append({"hour": d.hour, "temp": t, "hum": int(round(v[1])),
+                    "status": key, "status_ja": ja})
+    return out
+
+
 def summarize(rows):
     if not rows:
         return None

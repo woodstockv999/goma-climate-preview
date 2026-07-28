@@ -354,8 +354,12 @@
       var f = document.createDocumentFragment();
       f.appendChild(el("rect", { x: 0, y: pT, width: W, height: Math.max(0, sy(28) - pT), class: "band-crit" }));
       f.appendChild(el("line", { x1: 0, y1: sy(28), x2: W, y2: sy(28), class: "thresh-line" }));
+      // SERIES はストリップの枠と1対1で、記録の無い時間は null が入っている。
+      // null は飛ばすのではなく線を切る（繋ぐと、計測していない時間帯を
+      // 計測していたように見せてしまう）。
       var segs = [], cur = null;
       SERIES.forEach(function (c, i) {
+        if (!c) { if (cur) { segs.push(cur); cur = null; } return; }
         var hot = c.temp >= 28, pt = [sx(i), sy(c.temp)];
         if (!cur) { cur = { hot: hot, pts: [pt] }; }
         else if (cur.hot !== hot) { cur.pts.push(pt); segs.push(cur); cur = { hot: hot, pts: [pt] }; }
@@ -363,18 +367,28 @@
       });
       if (cur) { segs.push(cur); }
       segs.forEach(function (sg) {
-        if (sg.pts.length < 2) { return; }
+        if (sg.pts.length < 2) {
+          // 前後が欠けた孤立点。線にならないので点で置く
+          f.appendChild(el("circle", {
+            cx: sg.pts[0][0], cy: sg.pts[0][1], r: 1.4,
+            fill: sg.hot ? C.crit : C.ok, stroke: "none"
+          }));
+          return;
+        }
         var d = sg.pts.map(function (p, k) {
           return (k ? "L" : "M") + p[0].toFixed(1) + " " + p[1].toFixed(1);
         }).join(" ");
         f.appendChild(el("path", { d: d, class: "series-line", stroke: sg.hot ? C.crit : C.ok }));
       });
-      var lastC = SERIES[n - 1];
+      var lastI = -1;
+      for (var li = n - 1; li >= 0; li--) { if (SERIES[li]) { lastI = li; break; } }
+      if (lastI < 0) { return; }
+      var lastC = SERIES[lastI];
       // r は viewBox 単位なので、線と違って non-scaling-stroke では細くならない。
       // 表示倍率（約1.43倍）を見込んで小さめに取る。ホバー対象ではないので
       // 最小ヒット領域の下限も気にしなくてよい。
       f.appendChild(el("circle", {
-        cx: sx(n - 1), cy: sy(lastC.temp), r: 1.8,
+        cx: sx(lastI), cy: sy(lastC.temp), r: 1.8,
         fill: lastC.temp >= 28 ? C.crit : C.ok, stroke: "#fff"
       }));
       // 閾値ラベルは図内に置かない。高さ40単位に対して文字が大きく、折れ線と重なる。
@@ -390,7 +404,10 @@
       var W = 340, H = thresh ? 124 : 100, pL = 26, pR = 10, pT = 10, pB = 18;
       var iw = W - pL - pR, ih = H - pT - pB, last = vals.length - 1;
       svg.setAttribute("viewBox", "0 0 " + W + " " + H);
-      var X = function (i) { return pL + (iw * i) / last; };
+      // 記録が1点しか無いと last=0 になり、0除算で座標が全部 NaN になる。
+      // 実測を貯め始めた直後に必ず通る経路なので割る側を1で床止めする。
+      var denom = Math.max(1, last);
+      var X = function (i) { return pL + (iw * i) / denom; };
       var Y = function (v) { return pT + ih - ((v - lo) / (hi - lo)) * ih; };
       var f = document.createDocumentFragment();
 

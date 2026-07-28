@@ -131,7 +131,11 @@ class ClimateTemplates(Jinja2Templates):
         ctx["climate_src"] = "dummy" if use_dummy else "govee"
 
         d = _target_date(ctx)
-        rows = src.series(d, _last_hour(ctx, d))
+        # 合成データは「写真がある最後の時刻」で打ち切る（未来を作らないため）。
+        # 実測はセンサーが独立して動くので、写真の有無で切ってはいけない
+        # （14時が最後の写真、22時が最後の計測、という日に室温が丸ごと消えた）。
+        upto = 23 if not use_dummy else _last_hour(ctx, d)
+        rows = src.series(d, upto)
         ctx["climate_series"] = rows
         ctx["climate_summary"] = src.summarize(rows)
         ctx["climate"] = src.current(rows, stale=stale)
@@ -153,6 +157,17 @@ class ClimateTemplates(Jinja2Templates):
         for e in ctx.get("timeline") or []:
             if e.get("type") == "log":
                 e["climate"] = by_hour.get(e.get("hour"))
+
+        # トップのスパークライン用。24hストリップ（現在時刻で終わる24枠）と
+        # 1対1に並べる。記録の無い時間は None を残して長さを保つ——ここを詰めると
+        # 真上のストリップと時間軸がズレて、この図の意味が壊れる。
+        slots = ctx.get("hourly_slots") or []
+        if not slots:
+            ctx["climate_strip"] = []
+        elif use_dummy:
+            ctx["climate_strip"] = [by_hour.get(s["hour"]) for s in slots]
+        else:
+            ctx["climate_strip"] = climate_store.recent_hours(len(slots))
 
 
 prod_router.templates = ClimateTemplates(directory=str(APP_DIR / "templates"))
