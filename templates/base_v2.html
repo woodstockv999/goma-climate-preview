@@ -196,6 +196,14 @@
       border-top: 2px dashed var(--t-crit); margin: 0 4px 0 6px;
     }
     .spark { display: block; width: 100%; height: auto; }
+    /* スパークラインは viewBox 幅240を約344pxへ拡大表示するため、日別詳細のグラフ
+       （340→ほぼ等倍）と同じ stroke-width でも約1.4倍太く描かれてしまう。
+       non-scaling-stroke で線幅を画面実寸に固定し、小さい図に合う細さにする。 */
+    .spark .series-line, .spark .thresh-line, .spark circle {
+      vector-effect: non-scaling-stroke;
+    }
+    .spark .series-line { stroke-width: 1.4; }
+    .spark circle { stroke-width: 1.2; }
 
     /* 一覧の最高室温（トップ） */
     .day-top { display: flex; align-items: baseline; gap: 0.4rem; }
