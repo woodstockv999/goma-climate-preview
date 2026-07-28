@@ -1,166 +1,180 @@
 """ごまモニター 室温連携プレビュー。
 
-本番（~/apps/goma-monitor, port 3003）とは完全に独立。
-DB も Ring も Gemini も使わず、dummy.py が生成する決定論的なデータだけで動く。
-テンプレートは本番の web/templates を 2026-07-28 時点でコピーし、
-patch_templates.py で室温 UI を差し込んだもの。
+UI を本番と完全に一致させるため、**本番の web/router.py をそのまま import して使う**。
+集計ロジックを再実装しないので、行動サマリー・タイムライン・24hストリップ・
+30日一覧は本番と同一の結果になる。
+
+本番に対する安全性:
+  - DATA_DIR を本番より先にこのアプリの data/ へ向けるので、DB 接続先は
+    スナップショット（data/goma.db）。本番 DB へは読み書きとも到達しない。
+  - 画像は 242MB あるので複製せず、専用ルートが本番 data/ を読み取り専用で参照する
+    （本番 router の /image は DATA_DIR 配下しか許さないため、先に登録して差し替える）。
+  - Gemini を叩く /api/reanalyze と Ring を叩く /snapshot は import 前に潰す。
+
+室温だけが dummy.py 由来の合成値で、テンプレートへは ClimateTemplates が注入する。
 """
 
 import os
-from datetime import datetime, timedelta
+import sys
+from datetime import date, datetime
+from pathlib import Path
 
-from fastapi import FastAPI, Request
-from fastapi.responses import HTMLResponse, RedirectResponse, Response
-from fastapi.staticfiles import StaticFiles
-from fastapi.templating import Jinja2Templates
+APP_DIR = Path(__file__).resolve().parent
+PROD_DIR = Path("/home/w00dst0ck/apps/goma-monitor")
 
-import dummy
+# ── 本番モジュールを import する前に接続先を差し替える（順序が重要） ──
+os.environ["DATA_DIR"] = str(APP_DIR / "data")
+sys.path.insert(0, str(PROD_DIR))
+
+from fastapi import FastAPI, Request  # noqa: E402
+from fastapi.responses import FileResponse, JSONResponse  # noqa: E402
+from fastapi.staticfiles import StaticFiles  # noqa: E402
+from fastapi.templating import Jinja2Templates  # noqa: E402
+
+import dummy  # noqa: E402
+from web import router as prod_router  # noqa: E402
 
 BASE_PATH = os.environ.get("BASE_PATH", "/goma-preview").rstrip("/")
-# 実データが無いので「今」を固定する。時計が進んでも画面が変わらない方が比較しやすい。
-NOW = datetime(2026, 7, 28, 23, 0, 0)
 
-BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+# 接続先が本当にスナップショットを向いているか、起動時に確かめる
+import database  # noqa: E402
+
+assert str(APP_DIR) in database.DATABASE_URL, f"DB がプレビュー外を向いている: {database.DATABASE_URL}"
+assert str(APP_DIR) in str(prod_router.DATA_DIR), f"DATA_DIR が不正: {prod_router.DATA_DIR}"
+
+
+def _target_date(ctx) -> date:
+    """このページが対象にしている日付。"""
+    ds = ctx.get("date_str")
+    if ds:
+        try:
+            return datetime.strptime(ds, "%Y-%m-%d").date()
+        except ValueError:
+            pass
+    latest = ctx.get("latest_entry")
+    if latest and latest.get("date_str"):
+        try:
+            return datetime.strptime(latest["date_str"], "%Y-%m-%d").date()
+        except (ValueError, TypeError):
+            pass
+    days = ctx.get("days") or []
+    if days:
+        try:
+            return datetime.strptime(days[0]["date"], "%Y-%m-%d").date()
+        except (ValueError, KeyError, TypeError):
+            pass
+    return date.today()
+
+
+def _last_hour(ctx, d: date) -> int:
+    """その日の記録がある最後の時刻。無ければ23時。"""
+    latest = ctx.get("latest_entry")
+    if latest and latest.get("date_str") == d.isoformat() and latest.get("hour") is not None:
+        return int(latest["hour"])
+    hours = [
+        e["hour"] for e in (ctx.get("timeline") or [])
+        if e.get("type") == "log" and e.get("hour") is not None
+    ]
+    return max(hours) if hours else 23
+
+
+class ClimateTemplates(Jinja2Templates):
+    """本番テンプレート（パッチ済みコピー）へ室温データを流し込む。
+
+    本番 router のハンドラには一切手を入れず、描画の直前で context を足すだけ。
+    """
+
+    def TemplateResponse(self, *args, **kwargs):
+        request = args[0] if args and isinstance(args[0], Request) else kwargs.get("request")
+        ctx = kwargs.get("context")
+        if ctx is None:
+            for a in args:
+                if isinstance(a, dict):
+                    ctx = a
+                    break
+        if ctx is not None and request is not None:
+            try:
+                self._inject(request, ctx)
+            except Exception as e:  # 室温の合成でページ全体を落とさない
+                ctx.setdefault("base", BASE_PATH)
+                ctx["climate_error"] = str(e)
+        return super().TemplateResponse(*args, **kwargs)
+
+    @staticmethod
+    def _inject(request: Request, ctx: dict) -> None:
+        stale = request.query_params.get("sensor") == "stale"
+        ctx["base"] = BASE_PATH
+        ctx["preview"] = True
+        ctx["sensor_stale"] = stale
+
+        d = _target_date(ctx)
+        rows = dummy.series(d, _last_hour(ctx, d))
+        ctx["climate_series"] = rows
+        ctx["climate_summary"] = dummy.summarize(rows)
+        ctx["climate"] = dummy.current(rows, stale=stale)
+
+        # 30日一覧: 各日の最高気温
+        for row in ctx.get("days") or []:
+            try:
+                dd = datetime.strptime(row["date"], "%Y-%m-%d").date()
+            except (ValueError, KeyError, TypeError):
+                continue
+            t, key, ja = dummy.day_max(dd)
+            row["t_max"], row["t_status"], row["t_status_ja"] = t, key, ja
+
+        # タイムライン: 各時刻の室温
+        by_hour = {r["hour"]: r for r in rows}
+        for e in ctx.get("timeline") or []:
+            if e.get("type") == "log":
+                e["climate"] = by_hour.get(e.get("hour"))
+
+
+prod_router.templates = ClimateTemplates(directory=str(APP_DIR / "templates"))
+
 app = FastAPI(title="goma-climate-preview", docs_url=None, redoc_url=None)
-app.mount("/static", StaticFiles(directory=os.path.join(BASE_DIR, "static")), name="static")
-templates = Jinja2Templates(directory=os.path.join(BASE_DIR, "templates"))
-
-WEEKDAYS_JP = ["月", "火", "水", "木", "金", "土", "日"]
+app.mount("/static", StaticFiles(directory=str(PROD_DIR / "web/static")), name="static")
 
 
-def _ctx(request: Request, **kw):
-    """全テンプレート共通のコンテキスト。base はサブパス配信用のプレフィックス。"""
-    stale = request.query_params.get("sensor") == "stale"
-    ctx = {
-        "base": BASE_PATH,
-        "preview": True,
-        "sensor_stale": stale,
-        "now_str": NOW.strftime("%-m月%-d日 %H:%M"),
-    }
-    ctx.update(kw)
-    return ctx
+# ── 外部を叩く経路は本番 router より先に登録して潰す（先勝ちで無効化される） ──
+def _blocked(reason: str):
+    return JSONResponse({"detail": reason}, status_code=501)
 
 
-@app.get("/", response_class=HTMLResponse)
-async def index(request: Request):
-    stale = request.query_params.get("sensor") == "stale"
-    days = dummy.days_index(NOW, span=30)
-    timeline = dummy.timeline_for(NOW.date(), NOW)
-    latest = next((r for r in timeline if r["type"] == "log"), None)
-    if latest is not None:
-        latest = dict(latest)
-        latest["date_str"] = NOW.date().isoformat()
-
-    hourly_slots = [
-        {"hour": c["hour"], "label": dummy.activity_for(NOW.date(), c["hour"]),
-         "label_ja": dummy.LABEL_NAMES_JA[dummy.activity_for(NOW.date(), c["hour"])]}
-        for c in dummy.climate_series(NOW.date(), NOW.hour)
-    ]
-    counts = {}
-    for s in hourly_slots:
-        counts[s["label"]] = counts.get(s["label"], 0) + 1
-    chart_data = [
-        {"label": k, "label_ja": dummy.LABEL_NAMES_JA[k], "count": v}
-        for k, v in sorted(counts.items(), key=lambda kv: -kv[1])
-    ]
-
-    series = dummy.climate_series(NOW.date(), NOW.hour)
-    summary = dummy.summary_for(NOW.date(), timeline)
-
-    return templates.TemplateResponse(
-        request,
-        "index_v2.html",
-        context=_ctx(
-            request,
-            days=days,
-            chart_data=chart_data,
-            hourly_slots=hourly_slots,
-            latest_entry=latest,
-            today_str=NOW.strftime("%-m月%-d日") + f"（{WEEKDAYS_JP[NOW.weekday()]}）",
-            climate=dummy.current_climate(NOW, stale=stale),
-            climate_series=series,
-            climate_summary=summary,
-        ),
-    )
+@app.post("/api/reanalyze/{log_id}")
+async def _no_reanalyze(log_id: int):
+    return _blocked("プレビューでは再分析しません（Gemini API を消費するため）")
 
 
-@app.get("/day/{date_str}", response_class=HTMLResponse)
-async def day_view(request: Request, date_str: str):
-    try:
-        d = datetime.strptime(date_str, "%Y-%m-%d").date()
-    except ValueError:
-        return RedirectResponse(f"{BASE_PATH}/")
-
-    stale = request.query_params.get("sensor") == "stale"
-    timeline = dummy.timeline_for(d, NOW)
-    summary = dummy.summary_for(d, timeline)
-    series = dummy.climate_series(d, NOW.hour if d == NOW.date() else 23)
-
-    if d == NOW.date():
-        climate = dummy.current_climate(NOW, stale=stale)
-    else:
-        last = series[-1]
-        climate = {
-            "temp": last["temp"], "hum": last["hum"], "status": last["status"],
-            "status_ja": last["status_ja"], "hour": last["hour"],
-            "measured_at": f"{last['hour']:02d}:00", "age_hours": 0, "is_stale": False,
-        }
-        if stale:
-            climate = dummy.current_climate(NOW, stale=True)
-
-    return templates.TemplateResponse(
-        request,
-        "day_v2.html",
-        context=_ctx(
-            request,
-            date_str=date_str,
-            date_display=d.strftime("%-m月%-d日") + f"（{WEEKDAYS_JP[d.weekday()]}）",
-            timeline=timeline,
-            summary=summary,
-            label_names=dummy.LABEL_NAMES_JA,
-            diary_content=(
-                f"今日は最高 {summary['t_max']}℃ まで上がった。"
-                + ("暑い時間帯は伏せて動かなかった。" if summary["hot_hours"] else "過ごしやすい一日だった。")
-            ),
-            diary_pending=False,
-            climate=climate,
-            climate_series=series,
-            climate_summary=summary,
-        ),
-    )
+@app.post("/snapshot")
+async def _no_snapshot():
+    return _blocked("プレビューでは撮影しません（Ring カメラに接続しないため）")
 
 
-@app.get("/image/{path:path}")
-async def placeholder_image(path: str):
-    """ダミー写真。実画像が無いので、時刻入りのプレースホルダ SVG を返す。"""
-    hour = "??"
-    stem = path.rsplit("/", 1)[-1].split(".")[0]
-    if stem.isdigit():
-        hour = f"{int(stem):02d}"
-    svg = f"""<svg xmlns="http://www.w3.org/2000/svg" width="640" height="360" viewBox="0 0 640 360">
-  <defs><linearGradient id="g" x1="0" y1="0" x2="1" y2="1">
-    <stop offset="0%" stop-color="#332720"/><stop offset="60%" stop-color="#1a1210"/>
-    <stop offset="100%" stop-color="#241a14"/></linearGradient></defs>
-  <rect width="640" height="360" fill="url(#g)"/>
-  <text x="320" y="185" font-size="86" text-anchor="middle" opacity=".55">&#128054;</text>
-  <text x="320" y="250" font-size="20" text-anchor="middle" fill="#8c7464"
-        font-family="sans-serif">{hour}:00 のダミー画像</text>
-</svg>"""
-    return Response(content=svg, media_type="image/svg+xml",
-                    headers={"Cache-Control": "public, max-age=3600"})
+@app.get("/image/{media_path:path}")
+async def serve_image(media_path: str):
+    """写真は本番 data/ を読み取り専用で参照する（242MB を複製しないため）。
+
+    本番 router の同名ルートは DATA_DIR 配下しか許さず、symlink を .resolve() で
+    辿ると外に出て 403 になる。ここで先に登録して差し替える。
+    ディレクトリトラバーサルは本番と同じ方式で塞ぐ。
+    """
+    root = (PROD_DIR / "data").resolve()
+    full = (root / media_path).resolve()
+    if not full.is_relative_to(root):
+        return _blocked("Forbidden")
+    if not full.is_file():
+        return JSONResponse({"detail": "Image not found"}, status_code=404)
+    return FileResponse(str(full), media_type="image/jpeg")
 
 
 @app.get("/healthz")
 async def healthz():
-    return {"ok": True, "app": "goma-climate-preview", "now": NOW.isoformat()}
+    return {
+        "ok": True,
+        "app": "goma-climate-preview",
+        "db": database.DATABASE_URL,
+        "data_dir": str(prod_router.DATA_DIR),
+    }
 
 
-# 本番にある更新系 API はプレビューには無い。押されたら 501 を返して意図を明示する。
-@app.post("/api/log/{log_id}")
-@app.post("/api/reanalyze/{log_id}")
-@app.post("/snapshot")
-async def not_in_preview(log_id: int = 0):
-    return Response(
-        content='{"detail":"プレビュー環境では更新できません（ダミーデータのため）"}',
-        status_code=501, media_type="application/json; charset=utf-8",
-    )
+app.include_router(prod_router.router)

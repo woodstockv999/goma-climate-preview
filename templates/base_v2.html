@@ -237,14 +237,18 @@
     .tl-temp i.crit { background: var(--t-crit); }
     .tl-temp.crit { color: var(--t-crit); font-weight: 700; }
 
-    /* プレビュー環境であることを常時明示するバー */
+    /* プレビュー環境であることを常時明示するバー。
+       内箱を .site-header-inner と同じ max-width:640px に揃える
+       （揃えないとデスクトップでここだけ全幅に伸びて本番と違って見える）。 */
     .preview-bar {
       background: repeating-linear-gradient(135deg, #2a1d14, #2a1d14 10px, #322419 10px, #322419 20px);
-      color: #e0b070; font-size: 0.68rem; font-weight: 700;
-      padding: 0.3rem 1rem; text-align: center; letter-spacing: 0.02em;
+      color: #e0b070; font-size: 0.68rem; font-weight: 700; letter-spacing: 0.02em;
     }
-    .preview-bar a { color: #f0b020; }
-    .preview-bar .sw { margin-left: 0.5rem; }
+    .preview-bar-inner {
+      max-width: 640px; margin: 0 auto; padding: 0.3rem 1rem;
+      display: flex; align-items: center; gap: 0.5rem; flex-wrap: wrap;
+    }
+    .preview-bar a { color: #f0b020; margin-left: auto; }
 
     @media (prefers-reduced-motion: reduce) {
       *, *::before, *::after { animation: none !important; transition: none !important; }
@@ -262,14 +266,14 @@
   </header>
   {% if preview %}
   <div class="preview-bar">
-    プレビュー環境（ダミーデータ・本番とは別プロセス）
-    <span class="sw">
+    <div class="preview-bar-inner">
+      <span>プレビュー環境 — 室温のみダミー値</span>
       {% if sensor_stale %}
-        <a href="?">センサー正常に戻す</a>
+        <a href="?">センサーを正常に戻す</a>
       {% else %}
         <a href="?sensor=stale">センサー停止を再現</a>
       {% endif %}
-    </span>
+    </div>
   </div>
   {% endif %}
   <main class="page">
