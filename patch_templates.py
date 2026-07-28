@@ -133,8 +133,11 @@ CLIMATE_CSS = """
     .chart-head { display: flex; align-items: baseline; gap: 0.45rem; padding: 0 0.6rem; }
     .chart-title { font-size: 0.8rem; font-weight: 800; }
     .chart-now { margin-left: auto; font-size: 0.74rem; color: var(--muted); font-variant-numeric: tabular-nums; }
-    .chart-wrap { position: relative; }
-    .chart-svg { display: block; width: 100%; height: auto; touch-action: none; }
+    /* JS のクランプが効かなかった場合の保険。横だけ塞ぐ（overflow:hidden だと
+       吹き出しが上方向に切れるので不可。overflow-x:clip は縦を visible のまま残せる） */
+    .chart-wrap { position: relative; overflow-x: clip; }
+    /* pan-y にしないと、グラフに指を置いた状態で縦スクロールできなくなる */
+    .chart-svg { display: block; width: 100%; height: auto; touch-action: pan-y; }
     .grid-line { stroke: var(--border-2); stroke-width: 1; }
     .axis-text { fill: var(--muted); font-size: 9px; font-variant-numeric: tabular-nums; }
     .band-crit { fill: var(--t-crit); opacity: 0.07; }
@@ -293,9 +296,19 @@ CLIMATE_JS = """
         var cx = X(i), cy = Y(vals[i]);
         cross.setAttribute("x1", cx); cross.setAttribute("x2", cx); cross.setAttribute("opacity", "1");
         hdot.setAttribute("cx", cx); hdot.setAttribute("cy", cy); hdot.setAttribute("opacity", "1");
-        tip.style.left = (cx / W * 100) + "%"; tip.style.top = (cy / H * 100) + "%";
-        tip.style.opacity = "1";
+        // 先に文面を入れてから幅を測る（幅が確定しないとクランプできない）
         tip.textContent = SERIES[i].hour + ":00　" + vals[i] + unit;
+        tip.style.opacity = "1";
+        tip.style.top = (cy / H * 100) + "%";
+        // 右端・左端で吹き出しがコンテナからはみ出すと、ページ全体が横に広がり
+        // iPhone が縮小表示になる。左右をコンテナ内へクランプする。
+        var wrapW = (svg.parentElement && svg.parentElement.clientWidth) || svg.clientWidth;
+        var half = tip.offsetWidth / 2 + 2;
+        var px = (cx / W) * wrapW;
+        if (wrapW > tip.offsetWidth + 4) {
+          px = Math.max(half, Math.min(wrapW - half, px));
+        }
+        tip.style.left = px + "px";
       }
       hit.addEventListener("pointermove", move);
       hit.addEventListener("pointerdown", move);
