@@ -434,7 +434,7 @@
     <h3>✏️ ラベルを見直す</h3>
     <div class="edit-field">
       <label>ラベル</label>
-      <select id="edit-label">
+      <select id="edit-label" onchange="applyLabelDesc()">
         <option value="sleeping">💤 睡眠中</option>
         <option value="active">🐕 活動中</option>
         <option value="sitting">🐕 お座り中</option>
@@ -614,6 +614,27 @@
 
 <script>
 let _editLogId = null;
+
+// 「見直す」でラベルを選んだときに入れる定型の説明文。
+// 手入力を消さないよう、空欄か「別ラベルの定型文のまま」のときだけ差し替える。
+const LABEL_DESC = {
+  sleeping: 'ケージで丸まって寝ているごま',
+  active:   '部屋の中を元気に動き回っているごま',
+  sitting:  '床にお座りしてこちらを見ているごま',
+  walking:  '部屋の中をゆっくり歩いているごま',
+  playing:  'おもちゃを咥えて遊んでいるごま',
+  drinking: '水皿に顔を寄せて水を飲んでいるごま',
+  absent:   'フレーム内にごまの姿が見当たらない',
+  unknown:  '様子がはっきり判別できない',
+};
+const _AUTO_DESCS = new Set(Object.values(LABEL_DESC));
+
+function applyLabelDesc() {
+  const descEl = document.getElementById('edit-desc');
+  const cur = descEl.value.trim();
+  if (cur !== '' && !_AUTO_DESCS.has(cur)) return;   // 手で書いた文は残す
+  descEl.value = LABEL_DESC[document.getElementById('edit-label').value] || '';
+}
 
 function openLightbox(src) {
   const lb = document.getElementById('lb');

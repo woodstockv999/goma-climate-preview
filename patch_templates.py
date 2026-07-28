@@ -463,7 +463,35 @@ TL_TEMP = """            {% endif %}
             {% endif %}
 """
 
+LABEL_DESC_JS = """let _editLogId = null;
+
+// 「見直す」でラベルを選んだときに入れる定型の説明文。
+// 手入力を消さないよう、空欄か「別ラベルの定型文のまま」のときだけ差し替える。
+const LABEL_DESC = {
+  sleeping: 'ケージで丸まって寝ているごま',
+  active:   '部屋の中を元気に動き回っているごま',
+  sitting:  '床にお座りしてこちらを見ているごま',
+  walking:  '部屋の中をゆっくり歩いているごま',
+  playing:  'おもちゃを咥えて遊んでいるごま',
+  drinking: '水皿に顔を寄せて水を飲んでいるごま',
+  absent:   'フレーム内にごまの姿が見当たらない',
+  unknown:  '様子がはっきり判別できない',
+};
+const _AUTO_DESCS = new Set(Object.values(LABEL_DESC));
+
+function applyLabelDesc() {
+  const descEl = document.getElementById('edit-desc');
+  const cur = descEl.value.trim();
+  if (cur !== '' && !_AUTO_DESCS.has(cur)) return;   // 手で書いた文は残す
+  descEl.value = LABEL_DESC[document.getElementById('edit-label').value] || '';
+}
+"""
+
 patch("day_v2.html", [
+    # ── 「見直す」の定型文オートフィル（室温連携とは独立した機能追加） ──
+    ("let _editLogId = null;\n", LABEL_DESC_JS, 1),
+    ('<select id="edit-label">', '<select id="edit-label" onchange="applyLabelDesc()">', 1),
+
     # AI の分析精度バッジ（87% 等）を削除。
     # タイムラインに湿度が % で並ぶようになり、どちらの % か判別できないため。
     ('              {% if entry.confidence %}<span class="conf-badge">{{ "%.0f"|format(entry.confidence * 100) }}%</span>{% endif %}\n', "", 1),
