@@ -304,11 +304,20 @@
   {% if preview %}
   <div class="preview-bar">
     <div class="preview-bar-inner">
-      <span>プレビュー環境 — 室温のみダミー値</span>
-      {% if sensor_stale %}
-        <a href="?">センサーを正常に戻す</a>
+      {% if climate_src == 'dummy' %}
+        <span>プレビュー環境 — 室温はダミー値</span>
       {% else %}
-        <a href="?sensor=stale">センサー停止を再現</a>
+        <span>プレビュー環境 — 室温は Govee H5179 の実測値</span>
+      {% endif %}
+      {% if sensor_stale %}
+        <a href="?{{ 'src=dummy' if climate_src == 'dummy' }}">センサーを正常に戻す</a>
+      {% else %}
+        <a href="?sensor=stale{{ '&amp;src=dummy' if climate_src == 'dummy' }}">センサー停止を再現</a>
+      {% endif %}
+      {% if climate_src == 'dummy' %}
+        <a href="?" style="margin-left:0.9rem;">実測値に戻す</a>
+      {% else %}
+        <a href="?src=dummy" style="margin-left:0.9rem;">ダミーデータで見る</a>
       {% endif %}
     </div>
   </div>

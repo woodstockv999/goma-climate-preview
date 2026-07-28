@@ -31,6 +31,7 @@ from fastapi.responses import FileResponse, JSONResponse  # noqa: E402
 from fastapi.staticfiles import StaticFiles  # noqa: E402
 from fastapi.templating import Jinja2Templates  # noqa: E402
 
+import climate_store  # noqa: E402
 import dummy  # noqa: E402
 from web import router as prod_router  # noqa: E402
 
@@ -78,21 +79,13 @@ def _last_hour(ctx, d: date) -> int:
     return max(hours) if hours else 23
 
 
+# UI 刷新案（v3 = Apple 準拠 / v4 = 黒地の観測所）は 2026-07-28 に不採用。
+# テンプレートは templates/*_v3.html, *_v4.html に残してあるが、配信はしない。
+# 見返すときは _v2.html を差し替える分岐を戻すこと（git 履歴に実装がある）。
+#
+# 切替に使っていた cookie がブラウザに残っていると刷新案が出続けるので、
+# 応答のたびに期限切れにして現行UIへ引き戻す。
 UI_COOKIE = "goma_ui"
-UI_CHOICES = ("v2", "v3", "v4")
-
-
-def _pick_ui(request: Request) -> str:
-    """どのUI世代で描くか。?ui= が最優先、次に cookie、既定は現行の v2。
-
-    v3 のテンプレートは内部リンクに ?ui=v3 を必ず付けるので、cookie が無くても
-    行き来できる。cookie は戻るボタンや直リンクの取りこぼし対策。
-    """
-    q = request.query_params.get("ui")
-    if q in UI_CHOICES:
-        return q
-    c = request.cookies.get(UI_COOKIE)
-    return c if c in UI_CHOICES else "v2"
 
 
 class ClimateTemplates(Jinja2Templates):
@@ -112,51 +105,47 @@ class ClimateTemplates(Jinja2Templates):
                     ctx = a
                     break
 
-        ui = _pick_ui(request) if request is not None else "v2"
-
         if ctx is not None and request is not None:
             try:
                 self._inject(request, ctx)
             except Exception as e:  # 室温の合成でページ全体を落とさない
                 ctx.setdefault("base", BASE_PATH)
                 ctx["climate_error"] = str(e)
-            ctx["ui"] = ui
-
-        if ui != "v2":
-            suffix = "_%s.html" % ui
-            args = tuple(
-                a.replace("_v2.html", suffix) if isinstance(a, str) and a.endswith("_v2.html") else a
-                for a in args
-            )
-            name = kwargs.get("name")
-            if isinstance(name, str) and name.endswith("_v2.html"):
-                kwargs["name"] = name.replace("_v2.html", suffix)
 
         response = super().TemplateResponse(*args, **kwargs)
-        if request is not None and request.query_params.get("ui") in UI_CHOICES:
-            response.set_cookie(UI_COOKIE, ui, max_age=60 * 60 * 24 * 30, samesite="lax", path="/")
+        if request is not None and UI_COOKIE in request.cookies:
+            response.delete_cookie(UI_COOKIE, path="/")
         return response
 
     @staticmethod
     def _inject(request: Request, ctx: dict) -> None:
         stale = request.query_params.get("sensor") == "stale"
+        # 既定は Govee の実測値。?src=dummy で従来の合成データに戻せる
+        # （実測はまだ積み上がっていないので、UI の見え方を確かめたいときに使う）。
+        use_dummy = request.query_params.get("src") == "dummy"
+        src = dummy if use_dummy else climate_store
+
         ctx["base"] = BASE_PATH
         ctx["preview"] = True
         ctx["sensor_stale"] = stale
+        ctx["climate_src"] = "dummy" if use_dummy else "govee"
 
         d = _target_date(ctx)
-        rows = dummy.series(d, _last_hour(ctx, d))
+        rows = src.series(d, _last_hour(ctx, d))
         ctx["climate_series"] = rows
-        ctx["climate_summary"] = dummy.summarize(rows)
-        ctx["climate"] = dummy.current(rows, stale=stale)
+        ctx["climate_summary"] = src.summarize(rows)
+        ctx["climate"] = src.current(rows, stale=stale)
 
-        # 30日一覧: 各日の最高気温
+        # 30日一覧: 各日の最高気温。記録の無い日はキーごと置かない
+        # （None を入れると「最高 None℃」と描かれる）。
         for row in ctx.get("days") or []:
             try:
                 dd = datetime.strptime(row["date"], "%Y-%m-%d").date()
             except (ValueError, KeyError, TypeError):
                 continue
-            t, key, ja = dummy.day_max(dd)
+            t, key, ja = src.day_max(dd)
+            if t is None:
+                continue
             row["t_max"], row["t_status"], row["t_status_ja"] = t, key, ja
 
         # タイムライン: 各時刻の室温
