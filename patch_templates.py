@@ -468,15 +468,20 @@ LABEL_DESC_JS = """let _editLogId = null;
 // 「見直す」でラベルを選んだときに入れる定型の説明文。
 // ラベル変更のたびに必ず入れ替える。既存の説明文（Gemini が書いた文）は
 // 全記録に入っているので、「空欄のときだけ」等の条件を付けると一度も発動しない。
+//
+// 文面は prompt.md の description 規約に揃えること:
+//   「必ず『ごま』という名前を含め、少し自由で可愛らしい一言」
+// 以下は sleeping/active/sitting/walking/playing/drinking/absent が
+// prompt.md の例文そのもの。unknown だけ例が無いので同じ調子で補った。
 const LABEL_DESC = {
-  sleeping: 'ケージで丸まって寝ているごま',
-  active:   '部屋の中を元気に動き回っているごま',
-  sitting:  '床にお座りしてこちらを見ているごま',
-  walking:  '部屋の中をゆっくり歩いているごま',
-  playing:  'おもちゃを咥えて遊んでいるごま',
-  drinking: '水皿に顔を寄せて水を飲んでいるごま',
-  absent:   'フレーム内にごまの姿が見当たらない',
-  unknown:  '様子がはっきり判別できない',
+  sleeping: 'ごまはスヤスヤおやすみ中です',
+  active:   'ごまはパッチリ起きています',
+  sitting:  'ごまはまったりくつろぎ中です',
+  walking:  'ごまはトコトコ移動中です',
+  playing:  'ごまは元気にあそんでいます',
+  drinking: 'ごまはおみずを飲んでいます',
+  absent:   'ごまはどこかへお出かけ中です',
+  unknown:  'ごまの様子がよく見えません',
 };
 
 function applyLabelDesc() {
