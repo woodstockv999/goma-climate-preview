@@ -616,7 +616,8 @@
 let _editLogId = null;
 
 // 「見直す」でラベルを選んだときに入れる定型の説明文。
-// 手入力を消さないよう、空欄か「別ラベルの定型文のまま」のときだけ差し替える。
+// ラベル変更のたびに必ず入れ替える。既存の説明文（Gemini が書いた文）は
+// 全記録に入っているので、「空欄のときだけ」等の条件を付けると一度も発動しない。
 const LABEL_DESC = {
   sleeping: 'ケージで丸まって寝ているごま',
   active:   '部屋の中を元気に動き回っているごま',
@@ -627,13 +628,10 @@ const LABEL_DESC = {
   absent:   'フレーム内にごまの姿が見当たらない',
   unknown:  '様子がはっきり判別できない',
 };
-const _AUTO_DESCS = new Set(Object.values(LABEL_DESC));
 
 function applyLabelDesc() {
-  const descEl = document.getElementById('edit-desc');
-  const cur = descEl.value.trim();
-  if (cur !== '' && !_AUTO_DESCS.has(cur)) return;   // 手で書いた文は残す
-  descEl.value = LABEL_DESC[document.getElementById('edit-label').value] || '';
+  const label = document.getElementById('edit-label').value;
+  document.getElementById('edit-desc').value = LABEL_DESC[label] || '';
 }
 
 function openLightbox(src) {
