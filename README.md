@@ -55,6 +55,7 @@ sys.path に ~/apps/goma-monitor を追加
 | `main.py` | 本番 router の取り込み・室温注入・外部経路の遮断・画像ルート |
 | `climate_store.py` | Govee 取得・華氏→摂氏・`data/climate.db` へ保存・毎時平均で series を返す |
 | `record_climate.py` | cron から10分おき。記録＋停止検知＋暑さアラートの Discord 通知 |
+| `refresh_snapshot.py` | 本番DBのスナップショットを取り直す（cron で毎時 :05）。read-only 接続で複製するだけ |
 | `dummy.py` | 室温と湿度だけを日付から決定論的に生成（`?src=dummy` 用）。行動ログは本番DB由来 |
 | `patch_templates.py` | **本番へ移すときの差分**。アンカー方式で、一致数が想定と違えば即 exit |
 | `templates/*_v2.html` | 本番 `web/templates` のコピー + 上記パッチ適用済み |
