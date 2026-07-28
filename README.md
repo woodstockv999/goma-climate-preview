@@ -33,45 +33,45 @@ sys.path に ~/apps/goma-monitor を追加
 
 プレビュー上の「見直す」はスナップショットDBを書き換えるので、自由に触ってよい。
 
-## 3つのUI世代
+## データ源の切替
 
-`?ui=v2` / `?ui=v3` / `?ui=v4` で切り替わる（cookie `goma_ui` に30日保存。既定は v2）。
-router は自分がどれを描いているか知らない — `ClimateTemplates` が
-テンプレート名の `_v2.html` → `_v<n>.html` を差し替えるだけ。
+既定は **Govee H5179 の実測値**（`climate_store.py` が `data/climate.db` から読む）。
+`?src=dummy` で従来の合成データに戻せる — 実測がまだ薄い時間帯の見え方を確かめる用。
+センサー停止の再現は `?sensor=stale`。どちらもプレビューバーのリンクから行き来できる。
 
-| | v2（現行本番） | v3（Apple 準拠） | v4（観測所） |
-|---|---|---|---|
-| 地 | クリーム | 中性グレー＋ダーク対応 | 黒 |
-| 書体 | M PLUS Rounded 1c | SF Pro / Hiragino | Shippori Mincho B1 ＋ システム |
-| 24時間 | 横棒＋折れ線 | 同左 | **文字盤**（外周＝行動・軌道の半径＝室温） |
-| 一覧 | 枠付きカード30枚 | inset-grouped リスト | 全幅フィルムストリップ |
-| 動き | なし | なし | 入場演出・スクロール出現・残り火の明滅 |
+## 不採用になった UI 刷新案（v3 / v4）
 
-**情報の置き場所（何をどこに出すか）はどの世代も同じ。** 変えたのは見せ方だけ。
+2026-07-28 に v3（Apple 準拠）と v4（黒地の観測所）を作ったが、**どちらも不採用**。
+テンプレートは `templates/*_v3.html` / `*_v4.html` に残してあるが**配信していない**
+（`main.py` の切替分岐は削除済み。見返すなら git 履歴に実装がある）。
 
-### v4 の文字盤
-
-角度＝時刻（0時が真上）、外周の弧＝その時間の行動、内側の軌道の半径＝室温。
-破線の円が28℃で、軌道がそれより外へ膨らんだ区間がそのまま「暑かった時間」になる。
-触れるとその時刻の値が中央に出る。実装は `base_v4.html` の1つの IIFE。
-
-注意点（触るとき壊しやすい）:
-- `R_LO` は中央の数字の外接半径より大きく取る。小さいと数字が軌道に食い込む
-- 時刻の数字はリングの外に出るので `viewBox` に余白が要る（JS 側で上書きしている）
-- `reset()` を初期化時に呼ばないと中央が空のまま
-- プレビューバーとナビは1つの fixed な `.topbar` にまとめる。分けると写真の上で重なる
+要望は「黒基調・動きあり・**無駄のあるあえてのUI**」— つまり整理された最小限より
+意図のある過剰を好む。Apple 参照を「ミニマル」と訳したのが v3 の外し。
 
 ## 構成
 
 | ファイル | 役割 |
 |---|---|
-| `main.py` | 本番 router の取り込み・室温注入・UI世代の切替・外部経路の遮断・画像ルート |
-| `dummy.py` | 室温と湿度だけを日付から決定論的に生成。行動ログは本番DB由来 |
-| `patch_templates.py` | **v2 を本番へ移すときの差分**。アンカー方式で、一致数が想定と違えば即 exit |
+| `main.py` | 本番 router の取り込み・室温注入・外部経路の遮断・画像ルート |
+| `climate_store.py` | Govee 取得・華氏→摂氏・`data/climate.db` へ保存・毎時平均で series を返す |
+| `record_climate.py` | cron から10分おき。記録＋停止検知＋暑さアラートの Discord 通知 |
+| `dummy.py` | 室温と湿度だけを日付から決定論的に生成（`?src=dummy` 用）。行動ログは本番DB由来 |
+| `patch_templates.py` | **本番へ移すときの差分**。アンカー方式で、一致数が想定と違えば即 exit |
 | `templates/*_v2.html` | 本番 `web/templates` のコピー + 上記パッチ適用済み |
-| `templates/*_v3.html` | 刷新案。本番からのコピーではなく書き下ろし（移植はファイル差し替え） |
+| `templates/*_v3.html`, `*_v4.html` | 不採用の刷新案。配信していない |
 
 テンプレートを作り直すときは、本番から再コピーして `python3 patch_templates.py` を流す。
+
+**★テンプレートを直接編集したら、必ず `patch_templates.py` を同じ内容に追従させる。**
+追従しないと、このスクリプトが差分の正でなくなり、本番へ古い実装を出荷する。
+確認方法（本番から作り直したものが配信中と一致すれば正しい）:
+
+```bash
+W=$(mktemp -d) && cp patch_templates.py "$W/" \
+  && cp -r ~/apps/goma-monitor/web/templates "$W/templates" \
+  && (cd "$W" && python3 patch_templates.py) \
+  && diff -r "$W/templates" templates --exclude='*_v3.html' --exclude='*_v4.html'
+```
 
 ## UI 配置
 
@@ -92,9 +92,17 @@ router は自分がどれを描いているか知らない — `ClimateTemplates
 
 ## 本番への移植
 
-1. **テンプレート** — `patch_templates.py` を本番 `web/templates` に対して実行（`{{ base }}` 置換分は不要）
-2. **router.py** — context に `climate` / `climate_series` / `climate_summary`、`days[]` に `t_max`/`t_status`、`timeline[]` に `climate` を追加（`main.py` の `ClimateTemplates._inject` がそのまま雛形）
-3. **データ** — `dummy.py` を Govee H5179 の実データ取得に差し替え
+1. **テンプレート** — `patch_templates.py` を本番 `web/templates` に対して実行。
+   本番に不要な差分は2種類あり、**移植しないこと**:
+   - `{{ base }}` 置換（本番はサブパス配信でない）
+   - `PREVIEW_BAR`（プレビュー専用のデータ源切替）
+2. **router.py** — context に `climate` / `climate_series` / `climate_summary` / **`climate_strip`**、
+   `days[]` に `t_max`/`t_status`、`timeline[]` に `climate` を追加
+   （`main.py` の `ClimateTemplates._inject` がそのまま雛形）。
+   `climate_strip` は `climate_store.recent_hours(24)` — **24hストリップと同じ長さ・同じ並び**で、
+   記録の無い時間は `None` を残す。詰めるとスパークラインの時間軸がストリップとズレる
+3. **データ** — `climate_store.py` を本番へ持ち込み、`record_climate.py` の処理を
+   `scheduler.py` の毎時ジョブへ移す（取得間隔は10分なので別ジョブが要る）
 
 ## 撤去
 

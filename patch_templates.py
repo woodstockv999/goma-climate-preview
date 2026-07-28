@@ -224,8 +224,12 @@ CLIMATE_JS = """
       var f = document.createDocumentFragment();
       f.appendChild(el("rect", { x: 0, y: pT, width: W, height: Math.max(0, sy(28) - pT), class: "band-crit" }));
       f.appendChild(el("line", { x1: 0, y1: sy(28), x2: W, y2: sy(28), class: "thresh-line" }));
+      // SERIES はストリップの枠と1対1で、記録の無い時間は null が入っている。
+      // null は飛ばすのではなく線を切る（繋ぐと、計測していない時間帯を
+      // 計測していたように見せてしまう）。
       var segs = [], cur = null;
       SERIES.forEach(function (c, i) {
+        if (!c) { if (cur) { segs.push(cur); cur = null; } return; }
         var hot = c.temp >= 28, pt = [sx(i), sy(c.temp)];
         if (!cur) { cur = { hot: hot, pts: [pt] }; }
         else if (cur.hot !== hot) { cur.pts.push(pt); segs.push(cur); cur = { hot: hot, pts: [pt] }; }
@@ -233,18 +237,28 @@ CLIMATE_JS = """
       });
       if (cur) { segs.push(cur); }
       segs.forEach(function (sg) {
-        if (sg.pts.length < 2) { return; }
+        if (sg.pts.length < 2) {
+          // 前後が欠けた孤立点。線にならないので点で置く
+          f.appendChild(el("circle", {
+            cx: sg.pts[0][0], cy: sg.pts[0][1], r: 1.4,
+            fill: sg.hot ? C.crit : C.ok, stroke: "none"
+          }));
+          return;
+        }
         var d = sg.pts.map(function (p, k) {
           return (k ? "L" : "M") + p[0].toFixed(1) + " " + p[1].toFixed(1);
         }).join(" ");
         f.appendChild(el("path", { d: d, class: "series-line", stroke: sg.hot ? C.crit : C.ok }));
       });
-      var lastC = SERIES[n - 1];
+      var lastI = -1;
+      for (var li = n - 1; li >= 0; li--) { if (SERIES[li]) { lastI = li; break; } }
+      if (lastI < 0) { return; }
+      var lastC = SERIES[lastI];
       // r は viewBox 単位なので、線と違って non-scaling-stroke では細くならない。
       // 表示倍率（約1.43倍）を見込んで小さめに取る。ホバー対象ではないので
       // 最小ヒット領域の下限も気にしなくてよい。
       f.appendChild(el("circle", {
-        cx: sx(n - 1), cy: sy(lastC.temp), r: 1.8,
+        cx: sx(lastI), cy: sy(lastC.temp), r: 1.8,
         fill: lastC.temp >= 28 ? C.crit : C.ok, stroke: "#fff"
       }));
       // 閾値ラベルは図内に置かない。高さ40単位に対して文字が大きく、折れ線と重なる。
@@ -253,15 +267,27 @@ CLIMATE_JS = """
     }
 
     /* ── 日別詳細: 温度・湿度の2枚（1枚に2軸は立てない） ── */
-    function build(id, tipId, vals, lo, hi, ticks, unit, color, thresh) {
+    function build(id, tipId, key, lo, hi, ticks, unit, color, thresh) {
       var svg = document.getElementById(id);
       if (!svg) { return; }
       var tip = document.getElementById(tipId);
       var W = 340, H = thresh ? 124 : 100, pL = 26, pR = 10, pT = 10, pB = 18;
-      var iw = W - pL - pR, ih = H - pT - pB, last = vals.length - 1;
+      var iw = W - pL - pR, ih = H - pT - pB;
       svg.setAttribute("viewBox", "0 0 " + W + " " + H);
-      var X = function (i) { return pL + (iw * i) / last; };
+      // ★横軸は常に 0〜24時で固定し、点は自分の時刻の位置へ置く。
+      //   配列の並び順を時刻とみなしてはいけない——合成データは必ず0時始まりだったので
+      //   それで動いていたが、実測は途中から始まる。22時に設置した日、22時と23時の2点が
+      //   「0時・1時」として全幅に引き伸ばされて描かれた。センサーが落ちた日も同じく崩れる。
+      var X = function (h) { return pL + (iw * h) / 23; };
       var Y = function (v) { return pT + ih - ((v - lo) / (hi - lo)) * ih; };
+
+      var pts = [];
+      SERIES.forEach(function (c) {
+        if (!c || c[key] === null || c[key] === undefined) { return; }
+        pts.push({ h: c.hour, v: c[key] });
+      });
+      if (!pts.length) { return; }
+
       var f = document.createDocumentFragment();
 
       if (thresh && thresh < hi) {
@@ -277,29 +303,48 @@ CLIMATE_JS = """
         t.textContent = v + unit;
         f.appendChild(t);
       });
-      [0, 6, 12, 18, last].forEach(function (i) {
-        if (i > last) { return; }
+      [0, 6, 12, 18, 23].forEach(function (h) {
         var t = el("text", {
-          x: X(i), y: H - 5, class: "axis-text",
-          "text-anchor": i === 0 ? "start" : (i === last ? "end" : "middle")
+          x: X(h), y: H - 5, class: "axis-text",
+          "text-anchor": h === 0 ? "start" : (h === 23 ? "end" : "middle")
         });
-        t.textContent = (i === 23 ? 24 : i) + "時";
+        t.textContent = (h === 23 ? 24 : h) + "時";
         f.appendChild(t);
       });
 
-      var dLine = "";
-      vals.forEach(function (v, i) { dLine += (i ? "L" : "M") + X(i).toFixed(1) + " " + Y(v).toFixed(1) + " "; });
       var gid = id + "-g", defs = el("defs", {});
       var lg = el("linearGradient", { id: gid, x1: "0", y1: "0", x2: "0", y2: "1" });
       lg.appendChild(el("stop", { offset: "0%", "stop-color": color, "stop-opacity": "0.2" }));
       lg.appendChild(el("stop", { offset: "100%", "stop-color": color, "stop-opacity": "0" }));
       defs.appendChild(lg); f.appendChild(defs);
-      f.appendChild(el("path", {
-        d: dLine + "L" + X(last).toFixed(1) + " " + (pT + ih) + " L" + pL + " " + (pT + ih) + " Z",
-        fill: "url(#" + gid + ")", stroke: "none"
-      }));
-      f.appendChild(el("path", { d: dLine, class: "series-line", stroke: color }));
-      f.appendChild(el("circle", { cx: X(last), cy: Y(vals[last]), r: 4, fill: color, class: "end-dot" }));
+
+      // 記録が飛んでいる区間は線を繋がない。繋ぐと、計測していない時間帯を
+      // 計測していたように見せてしまう。
+      var segs = [], cur = [];
+      pts.forEach(function (p, i) {
+        if (i && p.h - pts[i - 1].h > 1) { segs.push(cur); cur = []; }
+        cur.push(p);
+      });
+      if (cur.length) { segs.push(cur); }
+
+      segs.forEach(function (sg) {
+        if (sg.length < 2) {
+          f.appendChild(el("circle", { cx: X(sg[0].h), cy: Y(sg[0].v), r: 2, fill: color, stroke: "none" }));
+          return;
+        }
+        var d = sg.map(function (p, k) {
+          return (k ? "L" : "M") + X(p.h).toFixed(1) + " " + Y(p.v).toFixed(1);
+        }).join(" ");
+        f.appendChild(el("path", {
+          d: d + " L" + X(sg[sg.length - 1].h).toFixed(1) + " " + (pT + ih) +
+             " L" + X(sg[0].h).toFixed(1) + " " + (pT + ih) + " Z",
+          fill: "url(#" + gid + ")", stroke: "none"
+        }));
+        f.appendChild(el("path", { d: d, class: "series-line", stroke: color }));
+      });
+
+      var lastP = pts[pts.length - 1];
+      f.appendChild(el("circle", { cx: X(lastP.h), cy: Y(lastP.v), r: 4, fill: color, class: "end-dot" }));
 
       var cross = el("line", { x1: 0, y1: pT, x2: 0, y2: pT + ih, class: "cross-line", opacity: "0" });
       var hdot = el("circle", { cx: 0, cy: 0, r: 4.5, fill: color, class: "end-dot", opacity: "0" });
@@ -308,19 +353,30 @@ CLIMATE_JS = """
       f.appendChild(hit);
       svg.appendChild(f);
 
+      function hide() {
+        cross.setAttribute("opacity", "0"); hdot.setAttribute("opacity", "0"); tip.style.opacity = "0";
+      }
+
       function move(ev) {
         var r = svg.getBoundingClientRect();
-        var i = Math.round(((((ev.clientX - r.left) / r.width) * W) - pL) / iw * last);
-        if (i < 0) { i = 0; }
-        if (i > last) { i = last; }
-        var cx = X(i), cy = Y(vals[i]);
+        var h = ((((ev.clientX - r.left) / r.width) * W) - pL) / iw * 23;
+        // 記録のある時刻へ吸着する。1.5時間以上離れていたら何も出さない
+        // （記録の無い時間帯に、離れた時刻の値を出すと誤読させる）。
+        var best = null, bestD = 1e9;
+        pts.forEach(function (p) {
+          var d = Math.abs(p.h - h);
+          if (d < bestD) { bestD = d; best = p; }
+        });
+        if (!best || bestD > 1.5) { hide(); return; }
+
+        var cx = X(best.h), cy = Y(best.v);
         cross.setAttribute("x1", cx); cross.setAttribute("x2", cx); cross.setAttribute("opacity", "0.35");
         hdot.setAttribute("cx", cx); hdot.setAttribute("cy", cy); hdot.setAttribute("opacity", "1");
         // 先に文面を入れてから幅を測る（幅が確定しないとクランプできない）
-        tip.textContent = SERIES[i].hour + ":00　" + vals[i] + unit;
+        tip.textContent = best.h + ":00　" + best.v + unit;
         tip.style.opacity = "1";
         tip.style.top = (cy / H * 100) + "%";
-        // 右端・左端で吹き出しがコンテナからはみ出すと、ページ全体が横に広がり
+        // 端で吹き出しがコンテナからはみ出すと、ページ全体が横に広がり
         // iPhone が縮小表示になる。左右をコンテナ内へクランプする。
         var wrapW = (svg.parentElement && svg.parentElement.clientWidth) || svg.clientWidth;
         var half = tip.offsetWidth / 2 + 2;
@@ -332,15 +388,11 @@ CLIMATE_JS = """
       }
       hit.addEventListener("pointermove", move);
       hit.addEventListener("pointerdown", move);
-      hit.addEventListener("pointerleave", function () {
-        cross.setAttribute("opacity", "0"); hdot.setAttribute("opacity", "0"); tip.style.opacity = "0";
-      });
+      hit.addEventListener("pointerleave", hide);
     }
 
-    var temps = SERIES.map(function (c) { return c.temp; });
-    var hums = SERIES.map(function (c) { return c.hum; });
-    build("chart-temp", "tip-temp", temps, 22, 34, [22, 28, 34], "℃", C.crit, 28);
-    build("chart-hum", "tip-hum", hums, 40, 90, [40, 65, 90], "%", C.hum, null);
+    build("chart-temp", "tip-temp", "temp", 22, 34, [22, 28, 34], "℃", C.crit, 28);
+    build("chart-hum", "tip-hum", "hum", 40, 90, [40, 65, 90], "%", C.hum, null);
   })();
   </script>
 """
@@ -385,14 +437,25 @@ ZOOM_JS = """
   </script>
 """
 
+# ★これはプレビュー専用。本番へは移植しない（本番は preview を context に入れないので
+#   仮に入っても描画されないが、意味の無い分岐を持ち込まないこと）。
 PREVIEW_BAR = """  {% if preview %}
   <div class="preview-bar">
     <div class="preview-bar-inner">
-      <span>プレビュー環境 — 室温のみダミー値</span>
-      {% if sensor_stale %}
-        <a href="?">センサーを正常に戻す</a>
+      {% if climate_src == 'dummy' %}
+        <span>プレビュー環境 — 室温はダミー値</span>
       {% else %}
-        <a href="?sensor=stale">センサー停止を再現</a>
+        <span>プレビュー環境 — 室温は Govee H5179 の実測値</span>
+      {% endif %}
+      {% if sensor_stale %}
+        <a href="?{{ 'src=dummy' if climate_src == 'dummy' }}">センサーを正常に戻す</a>
+      {% else %}
+        <a href="?sensor=stale{{ '&amp;src=dummy' if climate_src == 'dummy' }}">センサー停止を再現</a>
+      {% endif %}
+      {% if climate_src == 'dummy' %}
+        <a href="?" style="margin-left:0.9rem;">実測値に戻す</a>
+      {% else %}
+        <a href="?src=dummy" style="margin-left:0.9rem;">ダミーデータで見る</a>
       {% endif %}
     </div>
   </div>
@@ -452,7 +515,10 @@ CLIMATE_ROW = """
 """
 
 SPARK = """  <!-- 行動ストリップと同じ時間軸の室温 -->
-  {% if climate_series %}
+  {# climate_strip は真上の24hストリップと1対1（記録の無い時間は null）。
+     climate_series を使うと、実測が22時開始の日に22時が左端＝0時として描かれる #}
+  {% set strip_pts = (climate_strip or []) | select | list %}
+  {% if strip_pts | length > 1 %}
   <div class="spark-card">
     <div class="spark-head">
       <span>室温<i class="thresh-key"></i>28℃ 危険ライン</span>
@@ -461,7 +527,7 @@ SPARK = """  <!-- 行動ストリップと同じ時間軸の室温 -->
     <svg class="spark" id="spark" role="img"
          aria-label="直近24時間の室温推移。最高{{ climate_summary.t_max }}℃、最低{{ climate_summary.t_min }}℃。"></svg>
   </div>
-  <script type="application/json" id="climate-data">{{ climate_series | tojson }}</script>
+  <script type="application/json" id="climate-data">{{ climate_strip | tojson }}</script>
   {% endif %}
 
 """
