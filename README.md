@@ -91,13 +91,24 @@ W=$(mktemp -d) && cp patch_templates.py "$W/" \
 
 4色は categorical パレット検証 5/5 PASS。閾値は一般的な室内犬の目安で、実測後にごまに合わせて詰める。
 
+### ★最高/最低・危険時間は「生の記録」から出す（毎時平均から出してはいけない）
+
+折れ線は10分刻みのゆらぎを均すために**毎時平均**で描くが、`extremes()` と `hot_hours()` は
+**生の `climate_log` から** MAX/MIN を取る。平均から出すと時間内のピークが消えて、
+熱中症の監視で**危険側に外れる**（27.5→28.6→27.4 の1時間は平均27.8℃なので
+「注意」止まりになり、28℃超が無かったことになる）。実測8時間でも既に 23.9 vs 23.6 と
+0.3℃ずれていた。現在値は生の最新行なので、平均のままだと
+「現在23.7℃ / 最高23.6℃」という矛盾も出る。
+
 ## 本番への移植
 
 1. **テンプレート** — `patch_templates.py` を本番 `web/templates` に対して実行。
    本番に不要な差分は2種類あり、**移植しないこと**:
    - `{{ base }}` 置換（本番はサブパス配信でない）
    - `PREVIEW_BAR`（プレビュー専用のデータ源切替）
-2. **router.py** — context に `climate` / `climate_series` / `climate_summary` / **`climate_strip`**、
+2. **router.py** — context に `climate` / `climate_series` / `climate_summary` / **`climate_strip`** /
+   **`climate_is_today`**（日別詳細の現在値カードの出し分け。過去日に今の室温を大きく出すと
+   その日の記録だと誤読されるので、当日のページにしか出さない）、
    `days[]` に `t_max`/`t_status`、`timeline[]` に `climate` を追加
    （`main.py` の `ClimateTemplates._inject` がそのまま雛形）。
    `climate_strip` は `climate_store.recent_hours(24)` — **24hストリップと同じ長さ・同じ並び**で、

@@ -137,8 +137,11 @@ class ClimateTemplates(Jinja2Templates):
         upto = 23 if not use_dummy else _last_hour(ctx, d)
         rows = src.series(d, upto)
         ctx["climate_series"] = rows
-        ctx["climate_summary"] = src.summarize(rows)
+        ctx["climate_summary"] = src.summarize(rows, d)
         ctx["climate"] = src.current(rows, stale=stale)
+        # 日別詳細で「現在値」を出してよいのは当日だけ。過去日のページに今の室温を
+        # 大きく出すと、その日の記録だと誤読される。
+        ctx["climate_is_today"] = d == date.today()
 
         # 30日一覧: 各日の最高気温。記録の無い日はキーごと置かない
         # （None を入れると「最高 None℃」と描かれる）。

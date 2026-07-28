@@ -65,14 +65,19 @@ def series(d: date, upto_hour: int = 23):
     return out
 
 
-def summarize(rows):
+def summarize(rows, d=None):
+    # d は実測側が生の記録から最高/最低を取るために使う。合成データは
+    # 毎時値しか持たないので受け取るだけで無視する。
     if not rows:
         return None
     temps = [r["temp"] for r in rows]
+    hums = [r["hum"] for r in rows]
     hot = [r for r in rows if r["temp"] >= CRIT_TEMP]
     return {
         "t_max": max(temps),
         "t_min": min(temps),
+        "h_max": max(hums),
+        "h_min": min(hums),
         "hot_hours": len(hot),
         "hot_range": (hot[0]["hour"], hot[-1]["hour"]) if hot else None,
     }

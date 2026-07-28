@@ -133,6 +133,39 @@ CLIMATE_CSS = """
       background: #f1f0ef; border: 1px solid #ddd9d5; color: #4a443f;
     }
 
+    /* 現在値（日別詳細・当日のみ）。折れ線の右端を目で追わせずに「今どうなのか」を
+       数字で出す。単位は数字より小さく muted にして、値そのものを最初に読ませる。 */
+    .climate-now {
+      background: var(--surface); border: 1.5px solid var(--border-2);
+      border-radius: 16px; padding: 0.7rem 0.85rem 0.75rem; margin-bottom: 0.55rem;
+    }
+    .climate-now.warn { background: #fdf8ef; border-color: #ecd9b8; }
+    .climate-now.crit { background: #fdf0ec; border-color: #f2d3c9; }
+    .cn-head { display: flex; align-items: center; gap: 0.45rem; }
+    .cn-time {
+      margin-left: auto; font-size: 0.7rem; color: var(--muted);
+      font-variant-numeric: tabular-nums;
+    }
+    .cn-vals {
+      display: grid; grid-template-columns: 1fr 1fr;
+      margin-top: 0.5rem;
+    }
+    /* 2列の区切り。縦罫を1本引くだけで、どちらの数字がどちらの見出しに
+       属するかが視線を戻さずに分かる */
+    .cn-val + .cn-val { padding-left: 0.9rem; border-left: 1px solid var(--border-2); }
+    .cn-label { display: block; font-size: 0.7rem; font-weight: 700; color: var(--muted); }
+    .cn-num {
+      display: block; margin-top: 0.05rem;
+      font-size: 1.95rem; font-weight: 800; line-height: 1.15;
+      font-variant-numeric: tabular-nums; letter-spacing: -0.01em;
+    }
+    .cn-num i {
+      font-style: normal; font-size: 0.88rem; font-weight: 700;
+      color: var(--muted); margin-left: 0.08rem;
+    }
+    .climate-now.warn .cn-temp { color: var(--t-warn); }
+    .climate-now.crit .cn-temp { color: var(--t-crit); }
+
     /* グラフ（日別詳細） */
     .chart-card {
       background: var(--surface); border: 1.5px solid var(--border-2);
@@ -567,6 +600,26 @@ CLIMATE_BLOCK = """<!-- ── 室温（詳細ページはグラフ2枚のみ）
   <strong>{{ climate.age_hours }}時間 更新が止まっている。</strong>電池切れの可能性。以下は停止前までの記録。
 </div>
 {% endif %}
+{# 現在値は当日のページにしか出さない。過去日に今の室温を大きく出すと、
+   その日の記録だと誤読される。停止中は値そのものが無いので上の注意書きに任せる #}
+{% if climate_is_today and climate.temp is not none %}
+<div class="climate-now {{ climate.status }}">
+  <div class="cn-head">
+    <span class="t-pill {{ climate.status }}">{{ climate.status_ja }}</span>
+    <span class="cn-time">{{ climate.measured_at }} 時点</span>
+  </div>
+  <div class="cn-vals">
+    <div class="cn-val">
+      <span class="cn-label">室温</span>
+      <span class="cn-num cn-temp">{{ climate.temp }}<i>℃</i></span>
+    </div>
+    <div class="cn-val">
+      <span class="cn-label">湿度</span>
+      <span class="cn-num">{{ climate.hum }}<i>%</i></span>
+    </div>
+  </div>
+</div>
+{% endif %}
 <div class="chart-card">
   <div class="chart-head">
     <span class="chart-title">室温</span>
@@ -581,7 +634,7 @@ CLIMATE_BLOCK = """<!-- ── 室温（詳細ページはグラフ2枚のみ）
 <div class="chart-card">
   <div class="chart-head">
     <span class="chart-title">湿度</span>
-    <span class="chart-now">{{ climate_series[-1].hum }}%</span>
+    <span class="chart-now">最高 {{ climate_summary.h_max }}% / 最低 {{ climate_summary.h_min }}%</span>
   </div>
   <div class="chart-wrap">
     <svg class="chart-svg" id="chart-hum" role="img" aria-label="湿度の推移。"></svg>

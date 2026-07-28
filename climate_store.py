@@ -230,24 +230,68 @@ def recent_hours(n: int = 24) -> list:
     return out
 
 
-def summarize(rows):
+def extremes(d: _date):
+    """その日の最高/最低。**毎時平均ではなく生の記録から取る**。
+
+    折れ線は10分刻みのゆらぎを均すために毎時平均で描くが、最高/最低まで平均から
+    出すと時間内のピークが消える。熱中症の監視では危険側に外れるので使えない
+    （27.5→28.6→27.4 の1時間は平均27.8＝「注意」になり、28℃超が無かったことになる）。
+    現在値は生の最新行なので、平均から出すと「現在23.7℃ / 最高23.6℃」と矛盾もする。
+    """
+    r = _rows(
+        "SELECT MAX(temp_c), MIN(temp_c), MAX(hum), MIN(hum) "
+        "FROM climate_log WHERE date(ts) = ?",
+        (d.isoformat(),),
+    )
+    if not r or r[0][0] is None:
+        return None
+    t_hi, t_lo, h_hi, h_lo = r[0]
+    return {
+        "t_max": round(t_hi, 1), "t_min": round(t_lo, 1),
+        "h_max": int(round(h_hi)), "h_min": int(round(h_lo)),
+    }
+
+
+def hot_hours(d: _date) -> list:
+    """その日 28℃超を1回でも記録した時刻。**平均でなく時間内の最高で判定する**。
+
+    27.5→28.6→27.4 の1時間は平均27.8℃なので、平均で見ると危険域が無かったことになる。
+    「その時間に危険な暑さがあったか」を答えたいので MAX で判定する。
+    """
+    rows = _rows(
+        "SELECT CAST(strftime('%H', ts) AS INTEGER) AS h FROM climate_log "
+        "WHERE date(ts) = ? GROUP BY h HAVING MAX(temp_c) >= ? ORDER BY h",
+        (d.isoformat(), CRIT_TEMP),
+    )
+    return [int(r[0]) for r in rows if r[0] is not None]
+
+
+def summarize(rows, d: _date = None):
     if not rows:
         return None
     temps = [r["temp"] for r in rows]
-    hot = [r for r in rows if r["temp"] >= CRIT_TEMP]
+    hums = [r["hum"] for r in rows]
+    ext = extremes(d) if d is not None else None
+    if d is not None:
+        hot = hot_hours(d)
+    else:
+        hot = [r["hour"] for r in rows if r["temp"] >= CRIT_TEMP]
     return {
-        "t_max": max(temps),
-        "t_min": min(temps),
+        "t_max": ext["t_max"] if ext else max(temps),
+        "t_min": ext["t_min"] if ext else min(temps),
+        "h_max": ext["h_max"] if ext else max(hums),
+        "h_min": ext["h_min"] if ext else min(hums),
         "hot_hours": len(hot),
-        "hot_range": (hot[0]["hour"], hot[-1]["hour"]) if hot else None,
+        "hot_range": (hot[0], hot[-1]) if hot else None,
     }
 
 
 def day_max(d: _date):
-    rows = series(d)
-    if not rows:
+    # 30日一覧の「最高 X℃」と危険マーカーの元。ここも平均でなく生の記録から。
+    ext = extremes(d)
+    if ext is None:
         return None, "stale", "データなし"
-    t = max(r["temp"] for r in rows)
+    t = ext["t_max"]
     key, ja = temp_status(t)
     return t, key, ja
 
