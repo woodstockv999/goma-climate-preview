@@ -1,0 +1,358 @@
+{% extends "base_v3.html" %}
+
+{% block title %}ごまモニター{% endblock %}
+
+{% block nav %}
+<a class="nav-title" href="{{ base }}/?ui=v3">ごまモニター</a>
+<span class="nav-aside">{{ today_str }}</span>
+{% endblock %}
+
+{% block head %}
+<style>
+  /* ── ヒーロー ─────────────────────────────
+     写真は端末幅いっぱい。カードの枠に収めず、そこだけ「面」にする。 */
+  .hero { border-radius: 0; box-shadow: none; }
+  @media (min-width: 680px) { .hero { border-radius: 18px; box-shadow: var(--elev); } }
+
+  .hero-photo-wrap {
+    position: relative; width: 100%; aspect-ratio: 4/3;
+    background: #000; overflow: hidden;
+  }
+  .hero-photo {
+    width: 100%; height: 100%; object-fit: cover; object-position: 20% center;
+    display: block; cursor: zoom-in;
+  }
+  .hero-chips {
+    position: absolute; inset: auto 0 0 0;
+    background: linear-gradient(transparent, var(--scrim));
+    padding: 3rem 16px 0.85rem;
+    display: flex; align-items: center; gap: 0.5rem;
+  }
+  .chip {
+    font-size: 0.8125rem; font-weight: 600; color: rgba(255,255,255,0.95);
+    padding: 0.2rem 0.6rem; border-radius: 980px;
+    background: rgba(255,255,255,0.2);
+    -webkit-backdrop-filter: blur(12px); backdrop-filter: blur(12px);
+    font-variant-numeric: tabular-nums; white-space: nowrap;
+  }
+  .chip.away { background: rgba(255,255,255,0.16); color: rgba(255,255,255,0.8); }
+  .hero-chips .ov-temp { margin-left: auto; }
+
+  /* 写真の下。説明文を主役に据える */
+  .hero-body { padding: 1.1rem 20px 1.2rem; background: var(--surface); }
+  @media (min-width: 680px) { .hero-body { padding: 1.1rem 1.25rem 1.2rem; } }
+  .hero-line {
+    font-size: 1.375rem; font-weight: 600; letter-spacing: -0.021em;
+    line-height: 1.45;
+  }
+  .hero-meta {
+    margin-top: 0.5rem; display: flex; align-items: center;
+    gap: 0.5rem; flex-wrap: wrap;
+    font-size: 0.8125rem; color: var(--ink-3); font-variant-numeric: tabular-nums;
+  }
+  .hero-meta .sep { color: var(--hairline); }
+
+  .no-photo {
+    padding: 3.5rem 1rem; text-align: center; color: var(--ink-3);
+    background: var(--surface); border-radius: 18px; font-size: 0.9375rem;
+  }
+
+  /* 室温は面に載せる。以前「枠がなくて分かりにくい」と指摘のあった箇所なので、
+     見出しの階層だけに頼らず、地から一段持ち上げて塊として見せる。 */
+  .t-card { padding: 1.1rem 1.15rem 1rem; }
+  .t-note { margin-top: 0.7rem; font-size: 0.8125rem; color: var(--ink-3); line-height: 1.5; }
+
+  /* ── 24時間 ───────────────────────────── */
+  .strip-card { padding: 1rem 0 0.85rem; }
+  .strip {
+    display: flex; gap: 1.5px; height: 30px;
+    padding: 0 16px;
+  }
+  .strip > div { flex: 1; border-radius: 3px; }
+  .strip .sleeping { background: var(--c-sleeping); }
+  .strip .active   { background: var(--c-active); }
+  .strip .walking  { background: var(--c-walking); }
+  .strip .playing  { background: var(--c-playing); }
+  .strip .drinking { background: var(--c-drinking); }
+  .strip .sitting  { background: var(--c-sitting); }
+  .strip .absent   { background: var(--c-absent); }
+  .strip .unknown  { background: var(--c-unknown); }
+  .strip .unrecorded { background: var(--c-unrecorded); }
+
+  .strip-ticks {
+    display: flex; padding: 0.3rem 16px 0;
+    font-size: 0.625rem; color: var(--ink-3); font-variant-numeric: tabular-nums;
+  }
+  .strip-ticks > span { flex: 1; text-align: center; }
+
+  /* スパークラインには横パディングを入れない。入れると SVG の幅が縮み、
+     真上のストリップと時間軸がズレて、この図の意味
+     （暑い時間帯にごまが何をしていたか）が壊れる。 */
+  .spark-head {
+    display: flex; align-items: baseline; gap: 0.6rem; flex-wrap: wrap;
+    padding: 0.9rem 16px 0.2rem;
+    font-size: 0.75rem; color: var(--ink-3);
+  }
+  .spark-head .r { margin-left: auto; font-variant-numeric: tabular-nums; }
+  .spark-head b { color: var(--ink); font-weight: 600; }
+  /* 破線の見本を出して、図中の点線が何なのかを言葉で結ぶ */
+  .thresh-key {
+    display: inline-block; width: 14px; height: 0; vertical-align: middle;
+    border-top: 1.5px dashed var(--t-crit); margin: 0 5px;
+  }
+  .spark-pad { padding: 0 1.5px; }
+
+  .legend {
+    display: flex; flex-wrap: wrap; gap: 0.35rem 0.9rem;
+    padding: 0.85rem 16px 0; margin-top: 0.75rem;
+    border-top: 0.5px solid var(--hairline-2);
+    font-size: 0.75rem; color: var(--ink-2);
+  }
+  .legend .num { color: var(--ink-3); }
+
+  /* ── 30日リスト（iOS の inset-grouped） ──────── */
+  .list { background: var(--surface); border-radius: 18px; box-shadow: var(--elev); overflow: hidden; }
+  .row {
+    display: flex; align-items: center; gap: 0.85rem;
+    padding: 0.7rem 1rem 0.7rem 0.7rem;
+    color: inherit; text-decoration: none;
+    position: relative;
+  }
+  .row:hover { background: var(--surface-2); text-decoration: none; }
+  .row:active { background: var(--surface-2); }
+  /* 区切りはサムネイルの右端から始める（iOS の作法） */
+  .row + .row::before {
+    content: ""; position: absolute; top: 0; left: 4.05rem; right: 0;
+    border-top: 0.5px solid var(--hairline-2);
+  }
+  .row-thumb {
+    width: 52px; height: 52px; border-radius: 10px; flex: none;
+    background: var(--surface-2); overflow: hidden;
+    display: flex; align-items: center; justify-content: center;
+    color: var(--ink-3); font-size: 0.7rem;
+  }
+  .row-thumb img { width: 100%; height: 100%; object-fit: cover; object-position: 20% center; display: block; }
+  .row-main { flex: 1; min-width: 0; }
+  .row-date { font-size: 1.0625rem; font-weight: 500; letter-spacing: -0.01em; }
+  .row-sub {
+    margin-top: 0.15rem; display: flex; flex-wrap: wrap; gap: 0.15rem 0.6rem;
+    font-size: 0.75rem; color: var(--ink-3); font-variant-numeric: tabular-nums;
+  }
+  .row-sub .tag { gap: 0.25rem; }
+  .row-sub .dot { width: 6px; height: 6px; }
+  .row-end {
+    display: flex; align-items: center; gap: 0.4rem; flex: none;
+    font-size: 0.8125rem; color: var(--ink-3); font-variant-numeric: tabular-nums;
+  }
+  .row-end.warn { color: var(--t-warn); }
+  .row-end.crit { color: var(--t-crit); font-weight: 600; }
+  .row-end::after { content: "›"; color: var(--ink-3); font-size: 1.15rem; opacity: 0.6; }
+
+  #snap-msg { font-size: 0.8125rem; color: var(--ink-3); width: 100%; margin-top: 0.4rem; }
+
+  /* ── ライトボックス ───────────────────────── */
+  #lb {
+    display: none; position: fixed; inset: 0; z-index: 1000;
+    background: rgba(0,0,0,0.94); cursor: zoom-out;
+    align-items: center; justify-content: center;
+    -webkit-backdrop-filter: blur(6px); backdrop-filter: blur(6px);
+  }
+  #lb img { max-width: 96vw; max-height: 96vh; border-radius: 12px; object-fit: contain; }
+</style>
+{% endblock %}
+
+{% block content %}
+
+<!-- ── 今のごま ─────────────────────────────── -->
+<section class="sec">
+  {% if latest_entry and latest_entry.media_path %}
+    {% set img_path = base + '/image/' + latest_entry.media_path %}
+    <div class="card hero bleed">
+      <div class="hero-photo-wrap">
+        <img class="hero-photo" src="{{ img_path }}" alt="最新スナップショット"
+             onclick="openLightbox('{{ img_path }}')">
+        <div class="hero-chips">
+          <span class="chip num">{{ "%02d"|format(latest_entry.hour) }}:00</span>
+          <span class="chip {{ '' if latest_entry.dog_present else 'away' }}">{{ '在宅中' if latest_entry.dog_present else 'お出かけ中' }}</span>
+          {% if climate %}
+          <span class="ov-temp {{ climate.status }}">{% if climate.temp is not none %}{{ climate.temp }}℃{% else %}--.-℃{% endif %}</span>
+          {% endif %}
+        </div>
+      </div>
+      <div class="hero-body">
+        <p class="hero-line">{{ latest_entry.description or latest_entry.activity_label_ja }}</p>
+        <div class="hero-meta">
+          <span class="tag"><i class="dot {{ latest_entry.activity_label }}"></i>{{ latest_entry.activity_label_ja }}</span>
+          <span class="sep">|</span>
+          <span>{{ latest_entry.date_str }} {{ "%02d"|format(latest_entry.hour) }}:00 時点</span>
+        </div>
+      </div>
+    </div>
+  {% else %}
+    <div class="no-photo">
+      <p style="font-weight:600;color:var(--ink);margin-bottom:0.35rem;">まだデータがありません</p>
+      <p>Ring カメラの接続後、自動で記録が始まります</p>
+    </div>
+  {% endif %}
+</section>
+
+
+<!-- ── 室温 ────────────────────────────────── -->
+{% if climate %}
+<section class="sec">
+  <div class="sec-head">
+    <h2>室温</h2>
+    <span class="aside">
+      {% if climate.temp is not none %}{{ climate.measured_at }} 時点{% else %}更新停止中{% endif %}
+    </span>
+  </div>
+  <div class="card t-card">
+  {% if climate.temp is not none %}
+    <div class="readout {{ climate.status }}">
+      <span class="big">{{ climate.temp }}<span class="unit">℃</span></span>
+      <span class="side">
+        <span class="t-state {{ climate.status }}"><i></i>{{ climate.status_ja }}</span><br>
+        湿度 {{ climate.hum }}%
+      </span>
+    </div>
+    <p class="t-note num">
+      本日の最高 {{ climate_summary.t_max }}℃ ／ 最低 {{ climate_summary.t_min }}℃
+      {%- if climate_summary.hot_range %}・{{ climate_summary.hot_range[0] }}〜{{ climate_summary.hot_range[1] }}時が28℃超{% endif %}
+    </p>
+  {% else %}
+    <div class="readout stale">
+      <span class="big">計測できていない</span>
+    </div>
+    <p class="t-note">
+      最終更新 {{ climate.measured_at }}（{{ climate.age_hours }}時間前）・電池切れの可能性
+    </p>
+  {% endif %}
+  </div>
+</section>
+{% endif %}
+
+
+<!-- ── 直近24時間 ──────────────────────────── -->
+{% if hourly_slots %}
+<section class="sec">
+  <div class="sec-head">
+    <h2>直近24時間</h2>
+    <span class="aside">← 古い　新しい →</span>
+  </div>
+  <div class="card strip-card">
+    <div class="strip">
+      {% for slot in hourly_slots %}
+      <div class="{{ slot.label }}" title="{{ slot.hour }}時: {{ slot.label_ja }}"></div>
+      {% endfor %}
+    </div>
+    <div class="strip-ticks">
+      {% for slot in hourly_slots %}
+      <span>{% if loop.index0 in (0, 6, 12, 18) or loop.last %}{{ slot.hour }}{% endif %}</span>
+      {% endfor %}
+    </div>
+
+    {% if climate_series %}
+    <div class="spark-head">
+      <span>室温<i class="thresh-key"></i>28℃ 危険ライン</span>
+      <span class="r">最高 <b>{{ climate_summary.t_max }}℃</b>　最低 <b>{{ climate_summary.t_min }}℃</b></span>
+    </div>
+    <div class="spark-pad">
+      <svg class="spark" id="spark" role="img"
+           aria-label="直近24時間の室温推移。最高{{ climate_summary.t_max }}℃、最低{{ climate_summary.t_min }}℃。"></svg>
+    </div>
+    <script type="application/json" id="climate-data">{{ climate_series | tojson }}</script>
+    {% endif %}
+
+    <div class="legend">
+      {% for item in chart_data %}
+      <span class="tag"><i class="dot {{ item.label }}"></i>{{ item.label_ja }} <span class="num">{{ item.count }}h</span></span>
+      {% endfor %}
+    </div>
+  </div>
+</section>
+{% endif %}
+
+
+<!-- ── 30日 ───────────────────────────────── -->
+<section class="sec">
+  <div class="sec-head">
+    <h2>記録</h2>
+    <span class="aside" style="margin-left:auto;">
+      <button id="snap-btn" class="btn" onclick="takeSnapshot()">今すぐ記録</button>
+    </span>
+  </div>
+  <span id="snap-msg"></span>
+
+  {% if days %}
+  <div class="list">
+    {% for d in days %}
+    <a class="row" href="{{ base }}/day/{{ d.date }}?ui=v3">
+      <div class="row-thumb">
+        {% if d.latest_media_path %}
+          <img src="{{ base }}/image/{{ d.latest_media_path }}" loading="lazy" alt="{{ d.date }}のスナップ">
+        {% else %}
+          —
+        {% endif %}
+      </div>
+      <div class="row-main">
+        <div class="row-date num">{{ d.date[5:7]|int }}月{{ d.date[8:10]|int }}日</div>
+        <div class="row-sub">
+          {% for s in d.label_counts[:3] %}
+          <span class="tag"><i class="dot {{ s.label }}"></i>{{ s.label_ja }} {{ s.count }}h</span>
+          {% endfor %}
+        </div>
+      </div>
+      {% if d.t_max is defined %}
+      <div class="row-end {{ d.t_status if d.t_status in ('warn', 'crit') else '' }}">最高 {{ d.t_max }}℃</div>
+      {% else %}
+      <div class="row-end"></div>
+      {% endif %}
+    </a>
+    {% endfor %}
+  </div>
+  {% else %}
+  <div class="empty">
+    <p style="font-weight:600;color:var(--ink);margin-bottom:0.4rem;">まだデータがありません</p>
+    <p>bootstrap_auth.py で Ring 認証を完了してください</p>
+  </div>
+  {% endif %}
+</section>
+
+<!-- ライトボックス -->
+<div id="lb" onclick="this.style.display='none'">
+  <img id="lb-img" alt="拡大">
+</div>
+
+<script>
+function openLightbox(src) {
+  document.getElementById('lb-img').src = src;
+  document.getElementById('lb').style.display = 'flex';
+}
+document.addEventListener('keydown', e => {
+  if (e.key === 'Escape') document.getElementById('lb').style.display = 'none';
+});
+
+async function takeSnapshot() {
+  const btn = document.getElementById('snap-btn');
+  const msg = document.getElementById('snap-msg');
+  btn.disabled = true;
+  btn.textContent = '接続中…';
+  msg.textContent = '';
+  try {
+    const res = await fetch('{{ base }}/snapshot', { method: 'POST' });
+    if (res.ok) {
+      msg.style.color = 'var(--t-ok)';
+      msg.textContent = '記録しました';
+    } else {
+      msg.style.color = 'var(--t-crit)';
+      msg.textContent = await res.text();
+    }
+  } catch (e) {
+    msg.style.color = 'var(--t-crit)';
+    msg.textContent = String(e);
+  }
+  btn.disabled = false;
+  btn.textContent = '今すぐ記録';
+}
+</script>
+{% endblock %}

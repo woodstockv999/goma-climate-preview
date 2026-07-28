@@ -1,0 +1,460 @@
+{% extends "base_v3.html" %}
+
+{% block title %}{{ date_str }} — ごまモニター{% endblock %}
+
+{% block nav %}
+<a class="nav-back" href="{{ base }}/?ui=v3">一覧</a>
+<span class="nav-aside">{{ date_display }}</span>
+{% endblock %}
+
+{% block head %}
+<style>
+  /* ── 日記 ─────────────────────────────────
+     「紙」の意匠はやめ、地の上に文字を置く。行間を大きく取ると
+     カードで囲わなくても一つの塊として読める。 */
+  .day-title {
+    font-size: 2.125rem; font-weight: 600; letter-spacing: -0.03em;
+    line-height: 1.15; margin-bottom: 1.1rem;
+  }
+  .diary {
+    font-size: 1.1875rem; line-height: 2.05; letter-spacing: 0.005em;
+    color: var(--ink);
+  }
+  .diary-none { font-size: 1rem; color: var(--ink-3); }
+
+  .stats {
+    display: flex; gap: 2rem; flex-wrap: wrap;
+    margin-top: 1.6rem; padding-top: 1.2rem;
+    border-top: 0.5px solid var(--hairline);
+  }
+  .stat .v {
+    font-size: 1.75rem; font-weight: 600; letter-spacing: -0.025em;
+    font-variant-numeric: tabular-nums; line-height: 1.1;
+  }
+  .stat .k { font-size: 0.75rem; color: var(--ink-3); margin-top: 0.15rem; }
+  .stat.bad .v { color: var(--t-warn); }
+
+  /* ── 行動内訳 ─────────────────────────────
+       積み上げ棒は 10px の帯だけにして、数字は下の一覧に逃がす。
+       帯の中に文字を詰めるとセグメントが細いところで潰れて読めない。 */
+  .bar { display: flex; gap: 1.5px; height: 10px; border-radius: 5px; overflow: hidden; }
+  .bar > div { border-radius: 2px; }
+  .bar .sleeping { background: var(--c-sleeping); }
+  .bar .active   { background: var(--c-active); }
+  .bar .walking  { background: var(--c-walking); }
+  .bar .playing  { background: var(--c-playing); }
+  .bar .drinking { background: var(--c-drinking); }
+  .bar .sitting  { background: var(--c-sitting); }
+  .bar .absent   { background: var(--c-absent); }
+  .bar .unknown  { background: var(--c-unknown); }
+
+  .breakdown {
+    display: flex; flex-wrap: wrap; gap: 0.4rem 1.1rem; margin-top: 0.85rem;
+    font-size: 0.875rem; color: var(--ink-2);
+  }
+  .breakdown b { color: var(--ink); font-weight: 600; font-variant-numeric: tabular-nums; }
+
+  /* ── グラフ ───────────────────────────── */
+  .chart-card { padding: 1rem 0.3rem 0.6rem; margin-bottom: 0.7rem; }
+  .chart-head {
+    display: flex; align-items: baseline; gap: 0.5rem;
+    padding: 0 0.85rem; margin-bottom: 0.3rem;
+  }
+  .chart-head .t { font-size: 0.8125rem; font-weight: 600; color: var(--ink-2); }
+  .chart-head .v {
+    margin-left: auto; font-size: 0.8125rem; color: var(--ink-3);
+    font-variant-numeric: tabular-nums;
+  }
+
+  /* ── タイムライン ─────────────────────────
+       縦のレールと丸ポチをやめ、左に時刻の欄を置くだけにする。
+       行動の色は本文側のドットが担うので、装飾は要らない。 */
+  .tl { display: flex; flex-direction: column; gap: 0.85rem; }
+  .tl-row { display: flex; gap: 0.7rem; align-items: flex-start; }
+  .tl-hour {
+    width: 2.6rem; flex: none; text-align: right; padding-top: 0.25rem;
+    font-size: 0.8125rem; color: var(--ink-3); font-variant-numeric: tabular-nums;
+  }
+  .tl-body { flex: 1; min-width: 0; }
+  .tl-card { background: var(--surface); border-radius: 16px; box-shadow: var(--elev); overflow: hidden; }
+  .tl-photo-wrap { width: 100%; aspect-ratio: 16/9; background: #000; overflow: hidden; cursor: zoom-in; }
+  .tl-photo-wrap.compact { aspect-ratio: 21/9; }
+  .tl-photo { width: 100%; height: 100%; object-fit: cover; object-position: 20% center; display: block; }
+  .tl-in { padding: 0.7rem 0.85rem 0.75rem; }
+  .tl-top {
+    display: flex; align-items: center; gap: 0.6rem; flex-wrap: wrap;
+    font-size: 0.8125rem;
+  }
+  .tl-top .tag { font-weight: 600; }
+  .tl-acts { margin-left: auto; display: flex; align-items: center; gap: 0.2rem; flex: none; }
+  .tl-desc { margin-top: 0.35rem; font-size: 0.9375rem; line-height: 1.6; color: var(--ink-2); }
+
+  /* 記録の無い時間帯はカードを置かず、文字だけにする */
+  .tl-quiet { padding: 0.3rem 0; font-size: 0.875rem; color: var(--ink-3); }
+  .tl-quiet.bad { color: var(--t-warn); }
+
+  .tl-temp {
+    display: inline-flex; align-items: center; gap: 0.3rem;
+    font-size: 0.75rem; color: var(--ink-3);
+    font-variant-numeric: tabular-nums; white-space: nowrap;
+  }
+  .tl-temp i { width: 5px; height: 5px; border-radius: 50%; flex: none; display: block; }
+  .tl-temp i.warn { background: var(--t-warn); }
+  .tl-temp i.crit { background: var(--t-crit); }
+  .tl-temp.crit { color: var(--t-crit); font-weight: 600; }
+
+  .vote {
+    font-size: 0.6875rem; color: var(--ink-3);
+    padding: 0.1rem 0.45rem; border-radius: 980px; background: var(--surface-2);
+    white-space: nowrap;
+  }
+
+  /* ── モーダル ─────────────────────────── */
+  #edit-modal {
+    display: none; position: fixed; inset: 0; z-index: 1100;
+    background: rgba(0,0,0,0.4); align-items: center; justify-content: center;
+    -webkit-backdrop-filter: blur(8px); backdrop-filter: blur(8px);
+    padding: 20px;
+  }
+  #edit-modal.open { display: flex; }
+  .sheet {
+    background: var(--surface); border-radius: 20px;
+    padding: 1.5rem 1.4rem 1.25rem; width: min(100%, 380px);
+    display: flex; flex-direction: column; gap: 1.1rem;
+    box-shadow: 0 20px 60px rgba(0,0,0,0.3);
+  }
+  .sheet h3 { font-size: 1.1875rem; font-weight: 600; letter-spacing: -0.02em; }
+  .field { display: flex; flex-direction: column; gap: 0.35rem; }
+  .field label { font-size: 0.8125rem; color: var(--ink-3); }
+  /* 17px を割ると iOS がフォーカス時に勝手にズームする */
+  .field select, .field input[type="text"] {
+    font: inherit; font-size: 17px;
+    padding: 0.6rem 0.7rem; border-radius: 12px;
+    border: 0.5px solid var(--hairline);
+    background: var(--surface-2); color: var(--ink); width: 100%;
+    -webkit-appearance: none;
+  }
+  .field select { -webkit-appearance: menulist; }
+  .field input:focus, .field select:focus { outline: none; border-color: var(--accent); }
+  .sheet-actions { display: flex; gap: 0.5rem; justify-content: flex-end; }
+
+  #lb {
+    display: none; position: fixed; inset: 0; z-index: 1000;
+    background: rgba(0,0,0,0.94); cursor: zoom-out;
+    align-items: center; justify-content: center;
+    -webkit-backdrop-filter: blur(6px); backdrop-filter: blur(6px);
+  }
+  #lb img { max-width: 96vw; max-height: 96vh; border-radius: 12px; object-fit: contain; }
+</style>
+{% endblock %}
+
+{% block content %}
+
+<div id="lb" onclick="this.style.display='none'"><img id="lb-img" alt="スナップショット拡大"></div>
+
+<div id="edit-modal" onclick="if(event.target===this)closeEditModal()">
+  <div class="sheet">
+    <h3>ラベルを見直す</h3>
+    <div class="field">
+      <label>ラベル</label>
+      <select id="edit-label" onchange="applyLabelDesc()">
+        <option value="sleeping">睡眠中</option>
+        <option value="active">活動中</option>
+        <option value="sitting">お座り中</option>
+        <option value="walking">歩き中</option>
+        <option value="playing">遊び中</option>
+        <option value="drinking">飲水中</option>
+        <option value="absent">お出かけ中</option>
+        <option value="unknown">不明</option>
+      </select>
+    </div>
+    <div class="field">
+      <label>説明文</label>
+      <input type="text" id="edit-desc" maxlength="200" placeholder="例：ケージで丸まって寝ているごま">
+    </div>
+    <div class="sheet-actions">
+      <button class="btn btn-grey" onclick="closeEditModal()">キャンセル</button>
+      <button class="btn" id="edit-save-btn" onclick="saveEdit()">保存</button>
+    </div>
+  </div>
+</div>
+
+<!-- ── 日記 ─────────────────────────────────── -->
+<section class="sec">
+  <h1 class="day-title">{{ date_display }}</h1>
+  {% if diary_content %}
+  <p class="diary">{{ diary_content }}</p>
+  {% elif diary_pending %}
+  <p class="diary-none">毎日23時過ぎに日記を書きます</p>
+  {% else %}
+  <p class="diary-none">今日の日記はまだありません</p>
+  {% endif %}
+  <div class="stats">
+    <div class="stat"><div class="v">{{ summary.hours_present }}<span style="font-size:0.9rem;font-weight:400;color:var(--ink-3);">h</span></div><div class="k">在宅</div></div>
+    <div class="stat"><div class="v">{{ summary.snapshot_count }}<span style="font-size:0.9rem;font-weight:400;color:var(--ink-3);">枚</span></div><div class="k">記録</div></div>
+    {% if summary.gap_count > 0 %}
+    <div class="stat bad"><div class="v">{{ summary.gap_count }}</div><div class="k">取得エラー</div></div>
+    {% endif %}
+  </div>
+</section>
+
+<!-- ── 行動内訳 ──────────────────────────────── -->
+{% if summary.label_counts %}
+<section class="sec">
+  <div class="sec-head"><h2>行動内訳</h2></div>
+  <div class="bar">
+    {% for label, (count, label_ja) in summary.label_counts.items() %}
+    <div class="{{ label }}" style="flex: {{ count }};" title="{{ label_ja }} {{ count }}h"></div>
+    {% endfor %}
+  </div>
+  <div class="breakdown">
+    {% for label, (count, label_ja) in summary.label_counts.items() %}
+    <span class="tag"><i class="dot {{ label }}"></i>{{ label_ja }} <b>{{ count }}h</b></span>
+    {% endfor %}
+  </div>
+</section>
+{% endif %}
+
+<!-- ── 室温 ─────────────────────────────────── -->
+{% if climate and climate_series %}
+<section class="sec">
+  <div class="sec-head">
+    <h2>室温</h2>
+    <span class="aside">最高 {{ climate_summary.t_max }}℃ ／ 最低 {{ climate_summary.t_min }}℃</span>
+  </div>
+  {% if climate.temp is none %}
+  <div class="stale-note">
+    <b>{{ climate.age_hours }}時間 更新が止まっている。</b>電池切れの可能性。以下は停止前までの記録。
+  </div>
+  {% endif %}
+  <div class="card chart-card">
+    <div class="chart-head"><span class="t">室温</span><span class="v">{{ climate_series[-1].temp }}℃</span></div>
+    <div class="chart-wrap">
+      <svg class="chart-svg" id="chart-temp" role="img"
+           aria-label="室温の推移。最高{{ climate_summary.t_max }}℃、最低{{ climate_summary.t_min }}℃。"></svg>
+      <div class="chart-tip" id="tip-temp"></div>
+    </div>
+  </div>
+  <div class="card chart-card">
+    <div class="chart-head"><span class="t">湿度</span><span class="v">{{ climate_series[-1].hum }}%</span></div>
+    <div class="chart-wrap">
+      <svg class="chart-svg" id="chart-hum" role="img" aria-label="湿度の推移。"></svg>
+      <div class="chart-tip" id="tip-hum"></div>
+    </div>
+  </div>
+  <script type="application/json" id="climate-data">{{ climate_series | tojson }}</script>
+</section>
+{% endif %}
+
+<!-- ── タイムライン ──────────────────────────── -->
+<section class="sec">
+  <div class="sec-head"><h2>タイムライン</h2></div>
+  <div class="tl">
+    {% for entry in timeline %}
+    <div class="tl-row">
+      <div class="tl-hour">{{ "%02d"|format(entry.hour) }}時</div>
+      <div class="tl-body">
+        {% if entry.type == "log" %}
+          {% set img_url = (base + '/image/' + entry.media_path) if entry.media_path else "" %}
+          <div class="tl-card" data-log-id="{{ entry.id }}">
+            {% if entry.media_path %}
+            <div class="tl-photo-wrap{% if entry.activity_label == 'sleeping' or entry.decided_by == "opus_override" %} compact{% endif %}"
+                 onclick="openLightbox('{{ img_url }}')">
+              <img class="tl-photo" loading="lazy" src="{{ img_url }}" alt="{{ entry.hour }}時のスナップショット">
+            </div>
+            {% endif %}
+            <div class="tl-in">
+              <div class="tl-top">
+                <span class="tag"><i class="dot {{ entry.activity_label }}"></i>{{ entry.activity_label_ja }}</span>
+                {% if entry.climate %}
+                <span class="tl-temp {{ 'crit' if entry.climate.status == 'crit' else '' }}">
+                  {%- if entry.climate.status in ('warn', 'crit') %}<i class="{{ entry.climate.status }}"></i>{% endif -%}
+                  {{ entry.climate.temp }}℃ · {{ entry.climate.hum }}%
+                </span>
+                {% endif %}
+                <span class="tl-acts">
+                  {% if entry.decided_by == "flash" and entry.vote_total %}
+                  <span class="vote" title="Flash {{ entry.vote_total }}票中 {{ entry.vote_agree }}票一致">{{ entry.vote_agree }}/{{ entry.vote_total }}</span>
+                  {% elif entry.decided_by == "pro" %}
+                  <span class="vote" title="{% if entry.vote_total %}Flashの票が割れたため（{{ entry.vote_total }}票中一致せず）Proが判定{% else %}Flashが全滅したためProが判定{% endif %}">Pro判定</span>
+                  {% elif entry.decided_by == "opus_override" %}
+                  <span class="vote" title="Geminiの在宅判定をOpusが覆しました">Opus補正</span>
+                  {% endif %}
+                  <button class="btn btn-quiet"
+                          data-label="{{ entry.activity_label or 'unknown' }}"
+                          data-desc="{{ entry.description or '' }}"
+                          onclick="openEditModal({{ entry.id }}, this.dataset.label, this.dataset.desc)">見直す</button>
+                  <button class="btn btn-quiet" onclick="reanalyze(this, {{ entry.id }})">再分析</button>
+                </span>
+              </div>
+              {% if entry.description %}
+              <p class="tl-desc">{{ entry.description }}</p>
+              {% endif %}
+            </div>
+          </div>
+
+        {% elif entry.type == "gap" %}
+          <p class="tl-quiet bad">取得エラー</p>
+        {% elif entry.type == "future" %}
+          <p class="tl-quiet">まだ未来の時間帯です</p>
+        {% else %}
+          <p class="tl-quiet">データなし</p>
+        {% endif %}
+      </div>
+    </div>
+    {% endfor %}
+  </div>
+</section>
+
+<script>
+let _editLogId = null;
+
+// 「見直す」でラベルを選んだときに入れる定型の説明文。
+// ラベル変更のたびに必ず入れ替える。既存の説明文（Gemini が書いた文）は
+// 全記録に入っているので、「空欄のときだけ」等の条件を付けると一度も発動しない。
+//
+// 文面は prompt.md の description 規約に揃えること:
+//   「必ず『ごま』という名前を含め、少し自由で可愛らしい一言」
+const LABEL_DESC = {
+  sleeping: 'ごまはスヤスヤおやすみ中です',
+  active:   'ごまはパッチリ起きています',
+  sitting:  'ごまはまったりくつろぎ中です',
+  walking:  'ごまはトコトコ移動中です',
+  playing:  'ごまは元気にあそんでいます',
+  drinking: 'ごまはおみずを飲んでいます',
+  absent:   'ごまはどこかへお出かけ中です',
+  unknown:  'ごまの様子がよく見えません',
+};
+
+function applyLabelDesc() {
+  const label = document.getElementById('edit-label').value;
+  document.getElementById('edit-desc').value = LABEL_DESC[label] || '';
+}
+
+function openLightbox(src) {
+  document.getElementById('lb-img').src = src;
+  document.getElementById('lb').style.display = 'flex';
+}
+
+function openEditModal(logId, currentLabel, currentDesc) {
+  _editLogId = logId;
+  document.getElementById('edit-label').value = currentLabel || 'unknown';
+  document.getElementById('edit-desc').value = currentDesc || '';
+  document.getElementById('edit-modal').classList.add('open');
+  setTimeout(() => document.getElementById('edit-desc').focus(), 50);
+}
+
+function closeEditModal() {
+  document.getElementById('edit-modal').classList.remove('open');
+  _editLogId = null;
+}
+
+async function saveEdit() {
+  if (!_editLogId) return;
+  const label = document.getElementById('edit-label').value;
+  const desc = document.getElementById('edit-desc').value;
+  const saveBtn = document.getElementById('edit-save-btn');
+  saveBtn.disabled = true; saveBtn.textContent = '保存中…';
+  try {
+    const res = await fetch(`{{ base }}/api/log/${_editLogId}`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ activity_label: label, description: desc }),
+    });
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({}));
+      throw new Error(err.detail || `HTTP ${res.status}`);
+    }
+    const data = await res.json();
+    const row = document.querySelector(`.tl-card[data-log-id="${_editLogId}"]`);
+    if (row) {
+      const tagEl = row.querySelector('.tl-top .tag');
+      if (tagEl) {
+        tagEl.innerHTML = '';
+        const i = document.createElement('i');
+        i.className = `dot ${data.activity_label}`;
+        tagEl.appendChild(i);
+        tagEl.appendChild(document.createTextNode(data.activity_label_ja));
+      }
+      const editBtn = row.querySelector('.btn-quiet[data-label]');
+      if (editBtn) {
+        editBtn.dataset.label = data.activity_label;
+        editBtn.dataset.desc = data.description;
+      }
+      row.querySelector('.vote')?.remove();
+      const descEl = row.querySelector('.tl-desc');
+      if (data.description) {
+        if (descEl) descEl.textContent = data.description;
+        else {
+          const p = document.createElement('p');
+          p.className = 'tl-desc';
+          p.textContent = data.description;
+          row.querySelector('.tl-in').appendChild(p);
+        }
+      }
+    }
+    closeEditModal();
+  } catch (e) {
+    alert(`保存失敗: ${e.message}`);
+  } finally {
+    saveBtn.disabled = false; saveBtn.textContent = '保存';
+  }
+}
+
+async function reanalyze(btn, logId) {
+  btn.disabled = true; btn.textContent = '分析中…';
+  try {
+    const res = await fetch(`{{ base }}/api/reanalyze/${logId}`, { method: 'POST' });
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({}));
+      throw new Error(err.detail || `HTTP ${res.status}`);
+    }
+    const data = await res.json();
+    const row = btn.closest('.tl-card');
+    const tagEl = row.querySelector('.tl-top .tag');
+    if (tagEl) {
+      tagEl.innerHTML = '';
+      const i = document.createElement('i');
+      i.className = `dot ${data.activity_label}`;
+      tagEl.appendChild(i);
+      tagEl.appendChild(document.createTextNode(data.activity_label_ja));
+    }
+    let voteEl = row.querySelector('.vote');
+    if (!voteEl) {
+      voteEl = document.createElement('span');
+      voteEl.className = 'vote';
+      row.querySelector('.tl-acts')?.prepend(voteEl);
+    }
+    if (data.decided_by === 'flash' && data.vote_total) {
+      voteEl.title = `Flash ${data.vote_total}票中 ${data.vote_agree}票一致`;
+      voteEl.textContent = `${data.vote_agree}/${data.vote_total}`;
+    } else if (data.decided_by === 'pro') {
+      voteEl.title = data.vote_total
+        ? `Flashの票が割れたため（${data.vote_total}票中一致せず）Proが判定`
+        : 'Flashが全滅したためProが判定';
+      voteEl.textContent = 'Pro判定';
+    } else if (data.decided_by === 'opus_override') {
+      voteEl.title = 'Geminiの在宅判定をOpusが覆しました';
+      voteEl.textContent = 'Opus補正';
+    } else {
+      voteEl.remove();
+    }
+    const descEl = row.querySelector('.tl-desc');
+    if (data.description && descEl) descEl.textContent = data.description;
+    btn.textContent = '完了';
+    setTimeout(() => { btn.textContent = '再分析'; btn.disabled = false; }, 2000);
+  } catch (e) {
+    btn.textContent = 'エラー';
+    alert(`再分析失敗: ${e.message}`);
+    setTimeout(() => { btn.textContent = '再分析'; btn.disabled = false; }, 2000);
+  }
+}
+
+document.addEventListener('keydown', e => {
+  if (e.key === 'Escape') {
+    document.getElementById('lb').style.display = 'none';
+    closeEditModal();
+  }
+});
+</script>
+{% endblock %}

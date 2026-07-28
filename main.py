@@ -78,10 +78,29 @@ def _last_hour(ctx, d: date) -> int:
     return max(hours) if hours else 23
 
 
+UI_COOKIE = "goma_ui"
+UI_CHOICES = ("v2", "v3")
+
+
+def _pick_ui(request: Request) -> str:
+    """どのUI世代で描くか。?ui= が最優先、次に cookie、既定は現行の v2。
+
+    v3 のテンプレートは内部リンクに ?ui=v3 を必ず付けるので、cookie が無くても
+    行き来できる。cookie は戻るボタンや直リンクの取りこぼし対策。
+    """
+    q = request.query_params.get("ui")
+    if q in UI_CHOICES:
+        return q
+    c = request.cookies.get(UI_COOKIE)
+    return c if c in UI_CHOICES else "v2"
+
+
 class ClimateTemplates(Jinja2Templates):
     """本番テンプレート（パッチ済みコピー）へ室温データを流し込む。
 
     本番 router のハンドラには一切手を入れず、描画の直前で context を足すだけ。
+    テンプレート名の _v2 → _v3 差し替えもここで行うので、router 側は
+    どちらのUIを描いているか知らないままでいられる。
     """
 
     def TemplateResponse(self, *args, **kwargs):
@@ -92,13 +111,30 @@ class ClimateTemplates(Jinja2Templates):
                 if isinstance(a, dict):
                     ctx = a
                     break
+
+        ui = _pick_ui(request) if request is not None else "v2"
+
         if ctx is not None and request is not None:
             try:
                 self._inject(request, ctx)
             except Exception as e:  # 室温の合成でページ全体を落とさない
                 ctx.setdefault("base", BASE_PATH)
                 ctx["climate_error"] = str(e)
-        return super().TemplateResponse(*args, **kwargs)
+            ctx["ui"] = ui
+
+        if ui == "v3":
+            args = tuple(
+                a.replace("_v2.html", "_v3.html") if isinstance(a, str) and a.endswith("_v2.html") else a
+                for a in args
+            )
+            name = kwargs.get("name")
+            if isinstance(name, str) and name.endswith("_v2.html"):
+                kwargs["name"] = name.replace("_v2.html", "_v3.html")
+
+        response = super().TemplateResponse(*args, **kwargs)
+        if request is not None and request.query_params.get("ui") in UI_CHOICES:
+            response.set_cookie(UI_COOKIE, ui, max_age=60 * 60 * 24 * 30, samesite="lax", path="/")
+        return response
 
     @staticmethod
     def _inject(request: Request, ctx: dict) -> None:

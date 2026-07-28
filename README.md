@@ -33,14 +33,31 @@ sys.path に ~/apps/goma-monitor を追加
 
 プレビュー上の「見直す」はスナップショットDBを書き換えるので、自由に触ってよい。
 
+## 2つのUI世代
+
+`?ui=v3` / `?ui=v2` で切り替わる（cookie `goma_ui` に30日保存。既定は v2）。
+router は自分がどちらを描いているか知らない — `ClimateTemplates` が
+テンプレート名の `_v2.html` → `_v3.html` を差し替えるだけ。
+
+| | v2（現行本番の見た目） | v3（Apple 準拠の刷新案） |
+|---|---|---|
+| 書体 | M PLUS Rounded 1c（Google Fonts） | SF Pro / Hiragino（システム・外部通信なし） |
+| 面 | 1.5px の枠線で全要素を囲う | 枠線なし。面色・余白・0.5px ヘアライン |
+| ダーク | なし | `prefers-color-scheme` 対応 |
+| 写真 | カード内 16:9 | 全幅ブリード 4:3 |
+| 一覧 | 枠付きカード30枚 | iOS の inset-grouped リスト |
+
+情報の置き場所（何をどこに出すか）は v2 から変えていない。変えたのは見せ方だけ。
+
 ## 構成
 
 | ファイル | 役割 |
 |---|---|
-| `main.py` | 本番 router の取り込み・室温注入・外部経路の遮断・画像ルート |
+| `main.py` | 本番 router の取り込み・室温注入・UI世代の切替・外部経路の遮断・画像ルート |
 | `dummy.py` | 室温と湿度だけを日付から決定論的に生成。行動ログは本番DB由来 |
-| `patch_templates.py` | **本番テンプレートに入れるべき差分そのもの**。アンカー方式で、一致数が想定と違えば即 exit |
-| `templates/` | 本番 `web/templates` のコピー + 上記パッチ適用済み |
+| `patch_templates.py` | **v2 を本番へ移すときの差分**。アンカー方式で、一致数が想定と違えば即 exit |
+| `templates/*_v2.html` | 本番 `web/templates` のコピー + 上記パッチ適用済み |
+| `templates/*_v3.html` | 刷新案。本番からのコピーではなく書き下ろし（移植はファイル差し替え） |
 
 テンプレートを作り直すときは、本番から再コピーして `python3 patch_templates.py` を流す。
 
