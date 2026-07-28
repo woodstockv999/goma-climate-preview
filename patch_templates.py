@@ -164,6 +164,12 @@ CLIMATE_CSS = """
     .tl-temp i.crit { background: var(--t-crit); }
     .tl-temp.crit { color: var(--t-crit); font-weight: 700; }
 
+    /* ── ズーム禁止（写真の拡大表示中だけ解除） ──
+       ダブルタップ拡大は touch-action で殺せる。ピンチは iOS Safari が
+       user-scalable=no を無視するため JS の gesture イベントで止める。 */
+    body { touch-action: manipulation; }
+    #lb  { touch-action: auto; }   /* ライトボックス内は拡大できるまま残す */
+
     /* プレビュー環境であることを常時明示するバー。
        内箱を .site-header-inner と同じ max-width:640px に揃える
        （揃えないとデスクトップでここだけ全幅に伸びて本番と違って見える）。 */
@@ -325,6 +331,28 @@ CLIMATE_JS = """
   </script>
 """
 
+ZOOM_JS = """
+  <script>
+  /* ページのピンチズームを禁止する。ただし写真を拡大表示している間（#lb 表示中）は許可。
+
+     meta viewport の user-scalable=no / maximum-scale は iOS Safari が
+     アクセシビリティのため無視するので効かない。Safari 固有の gesture イベントを
+     止めるのが実際に効く唯一の方法。ダブルタップ拡大は CSS の touch-action 側で処理。 */
+  (function () {
+    "use strict";
+    function lightboxOpen() {
+      var lb = document.getElementById("lb");
+      return !!lb && getComputedStyle(lb).display !== "none";
+    }
+    ["gesturestart", "gesturechange", "gestureend"].forEach(function (type) {
+      document.addEventListener(type, function (e) {
+        if (!lightboxOpen()) { e.preventDefault(); }
+      }, { passive: false });
+    });
+  })();
+  </script>
+"""
+
 PREVIEW_BAR = """  {% if preview %}
   <div class="preview-bar">
     <div class="preview-bar-inner">
@@ -354,7 +382,7 @@ patch("base_v2.html", [
     ('<a class="site-logo" href="/">', '<a class="site-logo" href="{{ base }}/">', 1),
     # プレビューバー + 共通JS
     ('  <main class="page">', PREVIEW_BAR + '  <main class="page">', 1),
-    ("  </main>\n</body>", "  </main>\n" + CLIMATE_JS + "</body>", 1),
+    ("  </main>\n</body>", "  </main>\n" + CLIMATE_JS + ZOOM_JS + "</body>", 1),
 ])
 
 

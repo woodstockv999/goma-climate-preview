@@ -257,6 +257,12 @@
     .tl-temp i.crit { background: var(--t-crit); }
     .tl-temp.crit { color: var(--t-crit); font-weight: 700; }
 
+    /* ── ズーム禁止（写真の拡大表示中だけ解除） ──
+       ダブルタップ拡大は touch-action で殺せる。ピンチは iOS Safari が
+       user-scalable=no を無視するため JS の gesture イベントで止める。 */
+    body { touch-action: manipulation; }
+    #lb  { touch-action: auto; }   /* ライトボックス内は拡大できるまま残す */
+
     /* プレビュー環境であることを常時明示するバー。
        内箱を .site-header-inner と同じ max-width:640px に揃える
        （揃えないとデスクトップでここだけ全幅に伸びて本番と違って見える）。 */
@@ -442,6 +448,26 @@
     var hums = SERIES.map(function (c) { return c.hum; });
     build("chart-temp", "tip-temp", temps, 22, 34, [22, 28, 34], "℃", C.crit, 28);
     build("chart-hum", "tip-hum", hums, 40, 90, [40, 65, 90], "%", C.hum, null);
+  })();
+  </script>
+
+  <script>
+  /* ページのピンチズームを禁止する。ただし写真を拡大表示している間（#lb 表示中）は許可。
+
+     meta viewport の user-scalable=no / maximum-scale は iOS Safari が
+     アクセシビリティのため無視するので効かない。Safari 固有の gesture イベントを
+     止めるのが実際に効く唯一の方法。ダブルタップ拡大は CSS の touch-action 側で処理。 */
+  (function () {
+    "use strict";
+    function lightboxOpen() {
+      var lb = document.getElementById("lb");
+      return !!lb && getComputedStyle(lb).display !== "none";
+    }
+    ["gesturestart", "gesturechange", "gestureend"].forEach(function (type) {
+      document.addEventListener(type, function (e) {
+        if (!lightboxOpen()) { e.preventDefault(); }
+      }, { passive: false });
+    });
   })();
   </script>
 </body>
