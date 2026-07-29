@@ -14,8 +14,10 @@
      情報量ではなく「見に来た理由」に画面を使い切る。 */
   .hero { position: relative; height: 88svh; min-height: 460px; overflow: hidden; }
   .hero-media { position: absolute; inset: 0; background: #000; }
+  /* 縦長のヒーローで 16:9 の原画を cover すると横が大きく切れる。
+     ごまは画面下寄りに写るので、切り出しを少し下へずらして文字の上へ出す。 */
   .hero-media img {
-    width: 100%; height: 100%; object-fit: cover; object-position: 20% center;
+    width: 100%; height: 100%; object-fit: cover; object-position: 22% 62%;
     display: block; cursor: zoom-in;
   }
   /* 下端は地の黒へ溶かす。写真とページの境目を作らない */
@@ -82,7 +84,7 @@
   }
   .tile-veil {
     position: absolute; inset: 0; pointer-events: none;
-    background: linear-gradient(to top, rgba(11,10,9,0.9) 0%, rgba(11,10,9,0.25) 42%, rgba(11,10,9,0.3) 100%);
+    background: linear-gradient(to top, rgba(11,10,9,0.92) 0%, rgba(11,10,9,0.2) 46%, rgba(11,10,9,0.55) 100%);
   }
   .tile-copy { position: absolute; left: 1.1rem; right: 1.1rem; bottom: 1rem; }
   .tile-date {
@@ -168,7 +170,7 @@
          data-when="{% if climate and climate.temp is not none %}NOW {{ climate.measured_at }}{% else %}計測停止{% endif %}"
          data-temp="{% if climate and climate.temp is not none %}{{ climate.temp }}{% endif %}"
          data-alt="計測できていない"
-         data-st="{{ climate.status_ja if climate else '—' }}"
+         data-st="{% if climate and climate.temp is not none %}{{ climate.status_ja }}{% endif %}"
          data-sub="{% if climate and climate.temp is not none %}湿度 {{ climate.hum }}%{% elif climate %}{{ climate.age_hours }}時間前が最後{% endif %}"
          data-cls="{{ climate.status if climate else 'stale' }}">
       <div class="when"></div>

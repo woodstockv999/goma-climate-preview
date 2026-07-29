@@ -205,7 +205,7 @@ CLIMATE_CSS = """
        ダブルタップ拡大は touch-action で殺せる。ピンチは iOS Safari が
        user-scalable=no を無視するため JS の gesture イベントで止める。 */
     body { touch-action: manipulation; }
-    #lb  { touch-action: auto; }   /* ライトボックス内は拡大できるまま残す */
+    #lb  { touch-action: none; }   /* 拡大は img の transform で自前に処理する */
 
     /* プレビュー環境であることを常時明示するバー。
        内箱を .site-header-inner と同じ max-width:640px に揃える
@@ -539,48 +539,114 @@ CLIMATE_JS = """
 
 ZOOM_JS = """
   <script>
-  /* ページのピンチズームを禁止する。ただし写真を拡大表示している間（#lb 表示中）は許可。
+  /* 写真の拡大は img の transform で自前に持ち、ページの倍率は常に1のまま動かさない。
 
-     meta viewport の user-scalable=no / maximum-scale は iOS Safari が
-     アクセシビリティのため無視するので効かない。Safari 固有の gesture イベントを
-     止めるのが実際に効く唯一の方法。ダブルタップ拡大は CSS の touch-action 側で処理。 */
+     ブラウザ任せのピンチが拡大するのは img ではなく「ページ全体」なので、
+     ライトボックスを閉じても倍率だけが残り、下の日別詳細ページが拡大されたままになる。
+     閉じる瞬間に meta viewport を maximum-scale=1 にして戻す手も試したが、
+     iOS Safari はユーザー操作でかけた倍率を戻さない（実機で不発）。
+     自前で持てば「閉じる＝transform を捨てる」だけで確実に元へ戻る。
+
+     したがってページ側のズームは例外なく禁止する。iOS は user-scalable=no を
+     無視するので gesture イベントを止め、ダブルタップは touch-action + touchend で潰す。 */
   (function () {
     "use strict";
-    function lightboxOpen() {
-      var lb = document.getElementById("lb");
-      return !!lb && getComputedStyle(lb).display !== "none";
-    }
+    var lb  = document.getElementById("lb");
+    var img = document.getElementById("lb-img");
 
-    /* 拡大表示を閉じたときに、ページ側の倍率も1へ戻す。
-       ライトボックス内のピンチは img ではなくページ全体（visual viewport）を
-       拡大するので、閉じるだけだと日別詳細ページが拡大されたまま残る。
-       meta viewport を一瞬 maximum-scale=1 にすると Safari が倍率を戻す。
-       元の content へ復帰させないと、次に写真を開いてもピンチできなくなるので
-       必ず戻す。pristine な content は読み込み時に控えておく（連続で閉じたときに
-       書き換え済みの値を「元の値」として保存しないため）。 */
-    var vp = document.querySelector('meta[name="viewport"]');
-    var vpContent = vp ? vp.getAttribute("content") : null;
-    var vpTimer = null;
-    window.closeLightbox = function () {
-      var lb = document.getElementById("lb");
-      if (lb) { lb.style.display = "none"; }
-      if (!vp) { return; }
-      vp.setAttribute("content", vpContent + ", maximum-scale=1, user-scalable=no");
-      clearTimeout(vpTimer);
-      vpTimer = setTimeout(function () { vp.setAttribute("content", vpContent); }, 300);
-    };
-
-    // ピンチズーム
+    // ── ページのズーム禁止（ライトボックス中も含め例外なし） ──
     ["gesturestart", "gesturechange", "gestureend"].forEach(function (type) {
-      document.addEventListener(type, function (e) {
-        if (!lightboxOpen()) { e.preventDefault(); }
-      }, { passive: false });
+      document.addEventListener(type, function (e) { e.preventDefault(); }, { passive: false });
     });
 
-    // ダブルタップ拡大。touch-action:manipulation だけでは iOS が取りこぼすので、
+    var MAX = 5;
+    var scale = 1, tx = 0, ty = 0;        // 現在の変換
+    var s0 = 1, d0 = 0, ux = 0, uy = 0;   // ピンチ開始時の控え（ux,uy = 指の下の点）
+    var px = 0, py = 0, panning = false;
+    var movedAt = 0;                      // 指を動かした時刻。直後の click は閉じない
+
+    function apply() {
+      img.style.transform = "translate(" + tx + "px," + ty + "px) scale(" + scale + ")";
+    }
+    // 画像が画面から離れていかないように移動量を制限する
+    function clampPan() {
+      var mx = Math.max(0, (img.offsetWidth  * scale - window.innerWidth)  / 2);
+      var my = Math.max(0, (img.offsetHeight * scale - window.innerHeight) / 2);
+      tx = Math.min(mx, Math.max(-mx, tx));
+      ty = Math.min(my, Math.max(-my, ty));
+    }
+    // 画面中心を原点にした座標系。指の下にある点を固定したまま倍率を変える
+    function zoomAt(next, cx, cy) {
+      var ox = cx - window.innerWidth / 2, oy = cy - window.innerHeight / 2;
+      var ax = (ox - tx) / scale, ay = (oy - ty) / scale;
+      scale = Math.min(MAX, Math.max(1, next));
+      tx = ox - ax * scale; ty = oy - ay * scale;
+      if (scale === 1) { tx = 0; ty = 0; } else { clampPan(); }
+      apply();
+    }
+    function dist(t) {
+      return Math.hypot(t[0].clientX - t[1].clientX, t[0].clientY - t[1].clientY);
+    }
+    function mid(t, axis) {
+      return axis === "x"
+        ? (t[0].clientX + t[1].clientX) / 2 - window.innerWidth  / 2
+        : (t[0].clientY + t[1].clientY) / 2 - window.innerHeight / 2;
+    }
+
+    if (lb && img) {
+      lb.addEventListener("touchstart", function (e) {
+        var t = e.touches;
+        if (t.length === 2) {
+          panning = false; d0 = dist(t); s0 = scale;
+          ux = (mid(t, "x") - tx) / scale; uy = (mid(t, "y") - ty) / scale;
+        } else if (t.length === 1 && scale > 1) {
+          panning = true; px = t[0].clientX; py = t[0].clientY;
+        }
+      }, { passive: true });
+
+      lb.addEventListener("touchmove", function (e) {
+        var t = e.touches;
+        if (t.length === 2 && d0 > 0) {
+          e.preventDefault(); movedAt = Date.now();
+          scale = Math.min(MAX, Math.max(1, s0 * dist(t) / d0));
+          tx = mid(t, "x") - ux * scale; ty = mid(t, "y") - uy * scale;
+          clampPan(); apply();
+        } else if (panning && t.length === 1) {
+          e.preventDefault(); movedAt = Date.now();
+          tx += t[0].clientX - px; ty += t[0].clientY - py;
+          px = t[0].clientX; py = t[0].clientY;
+          clampPan(); apply();
+        }
+      }, { passive: false });
+
+      lb.addEventListener("touchend", function (e) {
+        if (e.touches.length === 0) {
+          d0 = 0; panning = false;
+          if (scale <= 1.01) { scale = 1; tx = 0; ty = 0; apply(); }
+        }
+      }, { passive: true });
+
+      // 動かした指を離した直後の click は「画面外タップ」ではないので閉じない。
+      // window の capture で止める（#lb の inline onclick へ届く前に走る）。
+      // 期限付きにするのは、ピンチ後に click が来ない端末でフラグが残り、
+      // 次の本物のタップを1回食べてしまうのを避けるため。
+      window.addEventListener("click", function (e) {
+        if (Date.now() - movedAt < 400) { e.stopPropagation(); e.preventDefault(); }
+      }, true);
+    }
+
+    window.closeLightbox = function () {
+      if (!lb) { return; }
+      lb.style.display = "none";
+      scale = 1; tx = 0; ty = 0;
+      if (img) { img.style.transform = ""; }
+    };
+
+    // ダブルタップ。touch-action:manipulation だけでは iOS が取りこぼすので、
     // 2回目のタップを直接潰す。誤爆を避けるため「300ms 以内」かつ
     // 「30px 以内の同じ場所」の2条件が揃ったときだけ抑止する
     // （別々のボタンを素早く連打した場合は通す）。
+    // 拡大表示中はページを拡大する代わりに、自前の倍率をトグルする。
     var lastEnd = 0, lastX = -999, lastY = -999;
     document.addEventListener("touchend", function (e) {
       var now = Date.now();
@@ -588,8 +654,12 @@ ZOOM_JS = """
       var x = t ? t.clientX : 0;
       var y = t ? t.clientY : 0;
       var samePlace = Math.abs(x - lastX) < 30 && Math.abs(y - lastY) < 30;
-      if (now - lastEnd <= 300 && samePlace && !lightboxOpen()) {
+      if (now - lastEnd <= 300 && samePlace) {
         e.preventDefault();
+        if (lb && img && getComputedStyle(lb).display !== "none") {
+          zoomAt(scale > 1 ? 1 : 2.5, x, y);
+          movedAt = now;
+        }
       }
       lastEnd = now; lastX = x; lastY = y;
     }, { passive: false });

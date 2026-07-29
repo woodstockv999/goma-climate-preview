@@ -6,9 +6,12 @@ Govee の公開APIに履歴が無いので、グラフの元データはこの�
 
     */10 * * * * cd ~/apps/goma-climate-preview && .venv/bin/python record_climate.py
 
-★停止検知がこのスクリプトの本題。乾電池駆動なので、電池が切れると
-  「エラーも出ないまま監視が止まる」のが最悪の失敗モード。
-  取得に失敗した回でも必ず停止判定まで走らせる（失敗こそが停止の原因なので）。
+通知は2種類:
+  停止検知  … 3時間データが届かない（乾電池駆動＝電池切れで無言停止するのが最悪の失敗モード）
+  暑さ検知  … 26℃で注意・28℃で危険。ヒステリシス付きで閾値付近の連打を防ぐ
+
+★取得に失敗した回でも必ず停止判定まで走らせる（失敗こそが停止の原因なので、
+  except で return すると API が落ちている間ずっと鳴らない）。
 """
 
 import subprocess
@@ -36,8 +39,7 @@ def notify(title: str, body: str, color: str) -> None:
         print(f"  discord-notify 失敗（記録は継続）: {e}", file=sys.stderr)
 
 
-def check_stale() -> None:
-    st = climate_store.staleness()
+def check_stale(st: dict) -> None:
     if not st["known"]:
         # 一度も記録が無い＝設置前。ここで鳴らしても意味がない
         return
@@ -160,9 +162,12 @@ def main() -> int:
 
     # 取得に失敗した回でも必ず通す。失敗が続くことこそが停止だから。
     try:
-        check_stale()
+        st = climate_store.staleness()
+        check_stale(st)     # 先に停止判定（暑さ判定は停止中はスキップする）
+        check_heat(st)
     except Exception as e:
-        print(f"{stamp} 停止判定に失敗: {e}", file=sys.stderr)
+        print(f"{stamp} 判定に失敗: {e}", file=sys.stderr)
+        traceback.print_exc(file=sys.stderr)
 
     return rc
 

@@ -196,24 +196,26 @@
     .dial-read {
       position: absolute; inset: 0; display: flex; flex-direction: column;
       align-items: center; justify-content: center; pointer-events: none; text-align: center;
+      /* 内円からはみ出させない。長い文言（「計測できていない」）はここで折り返る */
+      padding: 0 19%;
     }
     .dial-read .when {
       font-size: 0.62rem; letter-spacing: 0.3em; color: var(--ink-3);
       margin-bottom: 0.35rem; font-variant-numeric: tabular-nums;
     }
     .dial-read .t {
-      font-family: var(--serif); font-weight: 800; font-size: 4.1rem;
+      font-family: var(--serif); font-weight: 800; font-size: 3.15rem;
       line-height: 0.9; letter-spacing: 0.01em; font-variant-numeric: tabular-nums;
       transition: color 0.35s ease;
     }
-    .dial-read .t small { font-size: 1.3rem; font-weight: 400; color: var(--ink-3); }
+    .dial-read .t small { font-size: 1.1rem; font-weight: 400; color: var(--ink-3); }
     .dial-read .st { margin-top: 0.5rem; font-size: 0.72rem; letter-spacing: 0.2em; }
     .dial-read .sub { margin-top: 0.15rem; font-size: 0.68rem; color: var(--ink-3); letter-spacing: 0.1em; }
     .dial-read.cold .t { color: var(--t-cold); } .dial-read.cold .st { color: var(--t-cold); }
     .dial-read.ok   .t { color: var(--ink); }    .dial-read.ok   .st { color: var(--t-ok); }
     .dial-read.warn .t { color: var(--t-warn); } .dial-read.warn .st { color: var(--t-warn); }
     .dial-read.crit .t { color: var(--t-crit); } .dial-read.crit .st { color: var(--t-crit); }
-    .dial-read.stale .t { color: var(--ink-3); font-size: 1.5rem; }
+    .dial-read.stale .t { color: var(--ink-3); font-size: 1.2rem; line-height: 1.5; }
     .dial-read.stale .st { color: var(--ink-3); }
 
     .dial .hour-txt { fill: var(--ink-3); font-size: 9px; letter-spacing: 0.1em; font-family: var(--sans); }
@@ -383,7 +385,8 @@
     // 時刻の数字はリングの外側に出るので、viewBox に余白を持たせないと
     // 左右（6時・18時）の文字が切れる。テンプレート側の指定はここで上書きする。
     host.setAttribute("viewBox", "-18 -18 336 336");
-    var T_LO = 22, T_HI = 34, R_LO = 74, R_HI = 114;   // 室温の軌道
+    var T_LO = 22, T_HI = 34, R_LO = 88, R_HI = 122;   // 室温の軌道
+    // R_LO は中央の数字の外接半径より大きく取ること。74 だと 31.7℃ が軌道に食い込んだ。
     var CRIT = 28;
     var reduce = window.matchMedia && window.matchMedia("(prefers-reduced-motion: reduce)").matches;
 
