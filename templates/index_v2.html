@@ -368,16 +368,19 @@
     {% endfor %}
   </div>
   <!-- 行動ストリップと同じ時間軸の室温 -->
-  {% if climate_series %}
+  {# climate_strip は真上の24hストリップと1対1（記録の無い時間は null）。
+     climate_series を使うと、実測が22時開始の日に22時が左端＝0時として描かれる #}
+  {% set strip_pts = (climate_strip or []) | select | list %}
+  {% if strip_pts | length > 1 %}
   <div class="spark-card">
     <div class="spark-head">
-      <span>室温<i class="thresh-key"></i>28℃ 危険ライン</span>
+      <span>室温<i class="thresh-key"></i>26℃ 注意ライン</span>
       <span>最高 <b>{{ climate_summary.t_max }}℃</b>　最低 <b>{{ climate_summary.t_min }}℃</b></span>
     </div>
     <svg class="spark" id="spark" role="img"
          aria-label="直近24時間の室温推移。最高{{ climate_summary.t_max }}℃、最低{{ climate_summary.t_min }}℃。"></svg>
   </div>
-  <script type="application/json" id="climate-data">{{ climate_series | tojson }}</script>
+  <script type="application/json" id="climate-data">{{ climate_strip | tojson }}</script>
   {% endif %}
 
   <div class="strip-legend">
@@ -438,7 +441,7 @@
 {% endif %}
 
 <!-- Lightbox -->
-<div id="lb" onclick="this.style.display='none'" style="display:none;position:fixed;inset:0;background:rgba(10,6,4,0.94);z-index:1000;cursor:zoom-out;align-items:center;justify-content:center;backdrop-filter:blur(4px);">
+<div id="lb" onclick="closeLightbox()" style="display:none;position:fixed;inset:0;background:rgba(10,6,4,0.94);z-index:1000;cursor:zoom-out;align-items:center;justify-content:center;backdrop-filter:blur(4px);">
   <img id="lb-img" alt="拡大" style="max-width:96vw;max-height:96vh;border-radius:10px;object-fit:contain;box-shadow:0 8px 48px rgba(0,0,0,0.8);">
 </div>
 

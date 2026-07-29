@@ -79,56 +79,6 @@
     font-weight: 700;
   }
 
-  /* ── Summary bar ─────────────────────── */
-  .summary-section {
-    margin-bottom: 1.5rem;
-  }
-  .summary-bar {
-    display: flex;
-    height: 44px;
-    border-radius: 12px;
-    overflow: hidden;
-    margin-bottom: 0.6rem;
-    gap: 2px;
-  }
-  .bar-seg {
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    overflow: hidden;
-    white-space: nowrap;
-    font-size: 0.65rem;
-    font-weight: 700;
-    color: rgba(255,255,255,0.9);
-    padding: 0 4px;
-    transition: flex 0.3s ease;
-  }
-  .bar-seg.sleeping  { background: var(--c-sleeping); }
-  .bar-seg.active    { background: var(--c-active); }
-  .bar-seg.walking   { background: var(--c-walking); }
-  .bar-seg.playing   { background: var(--c-playing); }
-  .bar-seg.drinking  { background: var(--c-drinking); }
-  .bar-seg.sitting   { background: var(--c-sitting); }
-  .bar-seg.absent    { background: var(--c-absent); color: #444; }
-  .bar-seg.unknown   { background: var(--c-unknown); color: #555; }
-
-  .summary-stats {
-    display: flex;
-    gap: 1rem;
-    flex-wrap: wrap;
-  }
-  .stat-chip {
-    display: flex;
-    align-items: center;
-    gap: 5px;
-    font-size: 0.8rem;
-    color: var(--muted);
-  }
-  .stat-chip strong {
-    color: var(--text);
-    font-size: 0.95rem;
-  }
-
   /* ── Timeline feed ───────────────────── */
   .tl-feed {
     position: relative;
@@ -407,7 +357,7 @@
 {% block content %}
 
 <!-- Lightbox -->
-<div id="lb" onclick="this.style.display='none'">
+<div id="lb" onclick="closeLightbox()">
   <img id="lb-img" alt="スナップショット拡大">
 </div>
 
@@ -459,39 +409,25 @@
   </div>
 </div>
 
-<!-- Summary bar -->
-{% if summary.label_counts %}
-<div class="summary-section">
-  <div class="section-label">行動内訳</div>
-  <div class="summary-bar">
-    {% for label, (count, label_ja) in summary.label_counts.items() %}
-    <div class="bar-seg {{ label }}" style="flex: {{ count }};" title="{{ label_ja }} {{ count }}h">
-      {% if count >= 2 %}<span>{{ label_ja }}</span>{% endif %}
-    </div>
-    {% endfor %}
-  </div>
-  <div class="summary-stats">
-    {% for label, (count, label_ja) in summary.label_counts.items() %}
-    <div class="stat-chip">
-      <span class="pill {{ label }}" style="font-size:0.65rem;padding:2px 7px;">{{ label_ja }}</span>
-      <strong>{{ count }}h</strong>
-    </div>
-    {% endfor %}
-  </div>
-</div>
-{% endif %}
-
 <!-- ── 室温（詳細ページはグラフ2枚のみ） ──────── -->
 {% if climate and climate_series %}
-<div class="section-label">室温</div>
+{# 現在値は当日のページにしか出さない。過去日に今の室温を出すと、その日の記録だと
+   誤読される。停止中は値そのものが無いので下の注意書きに任せる #}
+{% set show_now = climate_is_today and climate.temp is not none %}
+<div class="section-label climate-head">室温{% if show_now %}<span class="at">{{ climate.measured_at }} 時点</span>{% endif %}</div>
 {% if climate.temp is none %}
 <div class="climate-stale">
   <strong>{{ climate.age_hours }}時間 更新が止まっている。</strong>電池切れの可能性。以下は停止前までの記録。
 </div>
 {% endif %}
+{# 最新値はグラフの終点に直接描く。JS が読む #}
+{% if show_now %}
+<script type="application/json" id="climate-now">{{ {'temp': climate.temp, 'hum': climate.hum, 'status': climate.status} | tojson }}</script>
+{% endif %}
 <div class="chart-card">
   <div class="chart-head">
     <span class="chart-title">室温</span>
+    {% if show_now %}<span class="t-pill {{ climate.status }}">{{ climate.status_ja }}</span>{% endif %}
     <span class="chart-now">最高 {{ climate_summary.t_max }}℃ / 最低 {{ climate_summary.t_min }}℃</span>
   </div>
   <div class="chart-wrap">
@@ -503,7 +439,7 @@
 <div class="chart-card">
   <div class="chart-head">
     <span class="chart-title">湿度</span>
-    <span class="chart-now">{{ climate_series[-1].hum }}%</span>
+    <span class="chart-now">最高 {{ climate_summary.h_max }}% / 最低 {{ climate_summary.h_min }}%</span>
   </div>
   <div class="chart-wrap">
     <svg class="chart-svg" id="chart-hum" role="img" aria-label="湿度の推移。"></svg>

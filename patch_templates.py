@@ -550,6 +550,26 @@ ZOOM_JS = """
       var lb = document.getElementById("lb");
       return !!lb && getComputedStyle(lb).display !== "none";
     }
+
+    /* 拡大表示を閉じたときに、ページ側の倍率も1へ戻す。
+       ライトボックス内のピンチは img ではなくページ全体（visual viewport）を
+       拡大するので、閉じるだけだと日別詳細ページが拡大されたまま残る。
+       meta viewport を一瞬 maximum-scale=1 にすると Safari が倍率を戻す。
+       元の content へ復帰させないと、次に写真を開いてもピンチできなくなるので
+       必ず戻す。pristine な content は読み込み時に控えておく（連続で閉じたときに
+       書き換え済みの値を「元の値」として保存しないため）。 */
+    var vp = document.querySelector('meta[name="viewport"]');
+    var vpContent = vp ? vp.getAttribute("content") : null;
+    var vpTimer = null;
+    window.closeLightbox = function () {
+      var lb = document.getElementById("lb");
+      if (lb) { lb.style.display = "none"; }
+      if (!vp) { return; }
+      vp.setAttribute("content", vpContent + ", maximum-scale=1, user-scalable=no");
+      clearTimeout(vpTimer);
+      vpTimer = setTimeout(function () { vp.setAttribute("content", vpContent); }, 300);
+    };
+
     // ピンチズーム
     ["gesturestart", "gesturechange", "gestureend"].forEach(function (type) {
       document.addEventListener(type, function (e) {
@@ -691,6 +711,9 @@ patch("index_v2.html", [
     ("src=\"/image/{{ d.latest_media_path }}\"", "src=\"{{ base }}/image/{{ d.latest_media_path }}\"", 1),
     ("{% set img_path = '/image/' + latest_entry.media_path %}",
      "{% set img_path = base + '/image/' + latest_entry.media_path %}", 1),
+    # 閉じるときにページの倍率も戻す（ZOOM_JS の closeLightbox）
+    ("""<div id="lb" onclick="this.style.display='none'" style="display:none;""",
+     """<div id="lb" onclick="closeLightbox()" style="display:none;""", 1),
     ("fetch('/snapshot'", "fetch('{{ base }}/snapshot'", 1),
 ])
 
@@ -914,6 +937,9 @@ patch("day_v2.html", [
     # 黄色い強調の CSS を削除
     (OUTING_CSS, "", 1),
     ('<a href="/"', '<a href="{{ base }}/"', 1),
+    # 閉じるときにページの倍率も戻す（ZOOM_JS の closeLightbox）
+    ("""<div id="lb" onclick="this.style.display='none'">""",
+     """<div id="lb" onclick="closeLightbox()">""", 1),
     ("{% set img_url = ('/image/' + entry.media_path) if entry.media_path else \"\" %}",
      "{% set img_url = (base + '/image/' + entry.media_path) if entry.media_path else \"\" %}", 1),
     ("fetch(`/api/log/${_editLogId}`", "fetch(`{{ base }}/api/log/${_editLogId}`", 1),

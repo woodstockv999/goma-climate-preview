@@ -190,11 +190,19 @@
       padding: 0 0.6rem; margin-bottom: 0.15rem;
     }
     .spark-head b { color: var(--text); font-size: 0.74rem; font-variant-numeric: tabular-nums; }
-    /* 危険ラインの凡例。破線の見本を出すことで、図中の点線が何なのかを言葉で示す */
+    /* 閾値ラインの凡例。破線の見本を出すことで、図中の点線が何なのかを言葉で示す */
     .thresh-key {
       display: inline-block; width: 13px; height: 0; vertical-align: middle;
-      border-top: 2px dashed var(--t-crit); margin: 0 4px 0 6px;
+      border-top: 2px dashed var(--t-warn); margin: 0 4px 0 6px;
     }
+    /* 3時間ごとに折れ線へ直接置く値。縦軸の目盛りより、この高さが何℃かを
+       直接読ませる方が小さい図には向く（軸を作ると横位置もずれる） */
+    .spark-val {
+      fill: var(--muted); font-size: 6.5px; font-weight: 700;
+      font-variant-numeric: tabular-nums;
+    }
+    .spark-val.warn { fill: var(--t-warn); }
+    .spark-val.crit { fill: var(--t-crit); }
     .spark { display: block; width: 100%; height: auto; }
     /* スパークラインは viewBox 幅240を約344pxへ拡大表示するため、日別詳細のグラフ
        （340→ほぼ等倍）と同じ stroke-width でも約1.4倍太く描かれてしまう。
@@ -226,14 +234,29 @@
       background: #f1f0ef; border: 1px solid #ddd9d5; color: #4a443f;
     }
 
+    /* 「室温」見出しの右に測定時刻。2枚のグラフで共通なので、カードごとに
+       持たせず見出しに1つだけ置く */
+    .climate-head { display: flex; align-items: baseline; }
+    .climate-head .at {
+      margin-left: auto; font-size: 0.7rem; font-weight: 600;
+      color: var(--muted); font-variant-numeric: tabular-nums;
+    }
+
     /* グラフ（日別詳細） */
     .chart-card {
       background: var(--surface); border: 1.5px solid var(--border-2);
       border-radius: 16px; padding: 0.7rem 0.3rem 0.5rem; margin-bottom: 0.55rem;
     }
-    .chart-head { display: flex; align-items: baseline; gap: 0.45rem; padding: 0 0.6rem; }
+    .chart-head { display: flex; align-items: center; gap: 0.4rem; padding: 0 0.6rem; }
     .chart-title { font-size: 0.8rem; font-weight: 800; }
     .chart-now { margin-left: auto; font-size: 0.74rem; color: var(--muted); font-variant-numeric: tabular-nums; }
+    /* 最新の値は折れ線の終点に直接置く。見出しに大きく出すより、どの点の値かが分かる */
+    .cur-label {
+      fill: var(--text); font-size: 10px; font-weight: 800;
+      font-variant-numeric: tabular-nums;
+    }
+    .cur-label.warn { fill: var(--t-warn); }
+    .cur-label.crit { fill: var(--t-crit); }
     /* JS のクランプが効かなかった場合の保険。横だけ塞ぐ（overflow:hidden だと
        吹き出しが上方向に切れるので不可。overflow-x:clip は縦を visible のまま残せる） */
     .chart-wrap { position: relative; overflow-x: clip; }
@@ -242,8 +265,11 @@
     .grid-line { stroke: var(--border-2); stroke-width: 1; }
     .axis-text { fill: var(--muted); font-size: 9px; font-variant-numeric: tabular-nums; }
     .band-crit { fill: var(--t-crit); opacity: 0.07; }
+    .band-warn { fill: var(--t-warn); opacity: 0.07; }
     .thresh-line { stroke: var(--t-crit); stroke-width: 1; stroke-dasharray: 3 3; opacity: 0.55; }
     .thresh-text { fill: var(--t-crit); font-size: 8.5px; font-weight: 700; }
+    .thresh-line.warn { stroke: var(--t-warn); }
+    .thresh-text.warn { fill: var(--t-warn); }
     .series-line { fill: none; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
     .end-dot { stroke: var(--surface); stroke-width: 2; }
     /* opacity をここで指定してはいけない。CSS は presentation attribute に勝つので、
@@ -335,7 +361,9 @@
     var SERIES = JSON.parse(node.textContent || "[]");
     if (!SERIES.length) { return; }
     var NS = "http://www.w3.org/2000/svg";
-    var C = { ok: "#2b9873", crit: "#a82815", hum: "#3a9fd4" };
+    var C = { ok: "#2b9873", warn: "#c67610", crit: "#a82815", hum: "#3a9fd4" };
+    // 室温ステータスと同じ区切り。図の帯（26℃橙・28℃赤）と線の色を必ず一致させる
+    var level = function (t) { return t >= 28 ? "crit" : (t >= 26 ? "warn" : "ok"); };
 
     function el(n, a) {
       var e = document.createElementNS(NS, n);
@@ -346,23 +374,41 @@
     /* ── トップ: 行動ストリップと同じ時間軸のスパークライン ── */
     var spark = document.getElementById("spark");
     if (spark) {
-      var n = SERIES.length, W = n * 10, H = 40, pT = 5, pB = 3, ih = H - pT - pB;
+      // ★縦軸は作らない。左に軸の余白を取ると折れ線が右へずれて、真上の24hストリップ
+      //   との1対1の対応が壊れる——縦に見て「暑い時間帯に何をしていたか」を読ませるのが
+      //   この図の存在意義なので横位置は動かせない。代わりに3時間ごとの値を線上に直接置く。
+      var n = SERIES.length, W = n * 10;
+      var pT = 11, pB = 6, H = 48;
+      var ih = H - pT - pB;
       spark.setAttribute("viewBox", "0 0 " + W + " " + H);
-      var lo = 22, hi = 34;
+      // 日別詳細のグラフと同じ 22〜28℃・同じ広げ方（違う目盛りだと2つの図が食い違う）
+      var lo = 22, hi = 28;
+      SERIES.forEach(function (c) {
+        if (!c) { return; }
+        if (c.temp > hi) { hi = Math.ceil(c.temp / 2) * 2; }
+        if (c.temp < lo) { lo = Math.floor(c.temp / 2) * 2; }
+      });
       var sx = function (i) { return i * 10 + 5; };
       var sy = function (v) { return pT + ih - ((v - lo) / (hi - lo)) * ih; };
       var f = document.createDocumentFragment();
-      f.appendChild(el("rect", { x: 0, y: pT, width: W, height: Math.max(0, sy(28) - pT), class: "band-crit" }));
-      f.appendChild(el("line", { x1: 0, y1: sy(28), x2: W, y2: sy(28), class: "thresh-line" }));
+      [{ v: 26, cls: "warn" }, { v: 28, cls: "crit" }].forEach(function (th) {
+        if (th.v >= hi) { return; }
+        f.appendChild(el("rect", {
+          x: 0, y: pT, width: W, height: Math.max(0, sy(th.v) - pT), class: "band-" + th.cls
+        }));
+        f.appendChild(el("line", {
+          x1: 0, y1: sy(th.v), x2: W, y2: sy(th.v), class: "thresh-line " + th.cls
+        }));
+      });
       // SERIES はストリップの枠と1対1で、記録の無い時間は null が入っている。
       // null は飛ばすのではなく線を切る（繋ぐと、計測していない時間帯を
       // 計測していたように見せてしまう）。
       var segs = [], cur = null;
       SERIES.forEach(function (c, i) {
         if (!c) { if (cur) { segs.push(cur); cur = null; } return; }
-        var hot = c.temp >= 28, pt = [sx(i), sy(c.temp)];
-        if (!cur) { cur = { hot: hot, pts: [pt] }; }
-        else if (cur.hot !== hot) { cur.pts.push(pt); segs.push(cur); cur = { hot: hot, pts: [pt] }; }
+        var lv = level(c.temp), pt = [sx(i), sy(c.temp)];
+        if (!cur) { cur = { lv: lv, pts: [pt] }; }
+        else if (cur.lv !== lv) { cur.pts.push(pt); segs.push(cur); cur = { lv: lv, pts: [pt] }; }
         else { cur.pts.push(pt); }
       });
       if (cur) { segs.push(cur); }
@@ -371,14 +417,14 @@
           // 前後が欠けた孤立点。線にならないので点で置く
           f.appendChild(el("circle", {
             cx: sg.pts[0][0], cy: sg.pts[0][1], r: 1.4,
-            fill: sg.hot ? C.crit : C.ok, stroke: "none"
+            fill: C[sg.lv], stroke: "none"
           }));
           return;
         }
         var d = sg.pts.map(function (p, k) {
           return (k ? "L" : "M") + p[0].toFixed(1) + " " + p[1].toFixed(1);
         }).join(" ");
-        f.appendChild(el("path", { d: d, class: "series-line", stroke: sg.hot ? C.crit : C.ok }));
+        f.appendChild(el("path", { d: d, class: "series-line", stroke: C[sg.lv] }));
       });
       var lastI = -1;
       for (var li = n - 1; li >= 0; li--) { if (SERIES[li]) { lastI = li; break; } }
@@ -387,66 +433,167 @@
       // r は viewBox 単位なので、線と違って non-scaling-stroke では細くならない。
       // 表示倍率（約1.43倍）を見込んで小さめに取る。ホバー対象ではないので
       // 最小ヒット領域の下限も気にしなくてよい。
-      f.appendChild(el("circle", {
-        cx: sx(lastI), cy: sy(lastC.temp), r: 1.8,
-        fill: lastC.temp >= 28 ? C.crit : C.ok, stroke: "#fff"
-      }));
+      // 3時間ごとの値を線上に直接置く。時刻そのもので選ぶので（i ではなく hour）、
+      // 24hの窓がどこから始まっても 0/3/6/9… の等間隔になる。
+      var marks = [];
+      for (var mi = 0; mi < n; mi++) {
+        if (SERIES[mi] && SERIES[mi].hour % 3 === 0) { marks.push(mi); }
+      }
+      // 直近の値は必ず出す。近すぎる3時間ラベルは重なるので落とす
+      marks = marks.filter(function (i) { return lastI - i >= 3; });
+      marks.push(lastI);
+
+      // 丸ポチを線に重ねる。数値だけだと「どの点の値か」が分からない。
+      // r は viewBox 単位なので、線と違って non-scaling-stroke では細くならない。
+      // 表示倍率（約1.43倍）を見込んで小さめに取る。
+      marks.forEach(function (i) {
+        var c = SERIES[i];
+        f.appendChild(el("circle", {
+          cx: sx(i), cy: sy(c.temp), r: i === lastI ? 1.9 : 1.6,
+          fill: C[level(c.temp)], stroke: "#fff"
+        }));
+      });
+      marks.forEach(function (i) {
+        var c = SERIES[i], x = sx(i), y = sy(c.temp);
+        // 上に置くのが基本。天井に近いときだけ下へ逃がす
+        var above = y - pT > 7;
+        var anchor = "middle";
+        if (x < 9) { anchor = "start"; } else if (x > W - 9) { anchor = "end"; }
+        var t = el("text", {
+          x: x, y: above ? y - 3.5 : y + 7,
+          class: "spark-val " + level(c.temp), "text-anchor": anchor
+        });
+        t.textContent = c.temp.toFixed(1);
+        f.appendChild(t);
+      });
       // 閾値ラベルは図内に置かない。高さ40単位に対して文字が大きく、折れ線と重なる。
       // 意味（何の線か）も伝わらないので、見出しの凡例に出している。
       spark.appendChild(f);
     }
 
     /* ── 日別詳細: 温度・湿度の2枚（1枚に2軸は立てない） ── */
-    function build(id, tipId, vals, lo, hi, ticks, unit, color, thresh) {
+    function build(id, tipId, key, lo, hi, ticks, unit, color, threshes, now) {
       var svg = document.getElementById(id);
       if (!svg) { return; }
       var tip = document.getElementById(tipId);
-      var W = 340, H = thresh ? 124 : 100, pL = 26, pR = 10, pT = 10, pB = 18;
-      var iw = W - pL - pR, ih = H - pT - pB, last = vals.length - 1;
+      threshes = threshes || [];
+      var W = 340, H = threshes.length ? 124 : 100, pL = 26, pR = 10, pT = 10, pB = 18;
+      var iw = W - pL - pR, ih = H - pT - pB;
       svg.setAttribute("viewBox", "0 0 " + W + " " + H);
-      // 記録が1点しか無いと last=0 になり、0除算で座標が全部 NaN になる。
-      // 実測を貯め始めた直後に必ず通る経路なので割る側を1で床止めする。
-      var denom = Math.max(1, last);
-      var X = function (i) { return pL + (iw * i) / denom; };
+      // ★横軸は常に 0〜24時で固定し、点は自分の時刻の位置へ置く。
+      //   配列の並び順を時刻とみなしてはいけない——合成データは必ず0時始まりだったので
+      //   それで動いていたが、実測は途中から始まる。22時に設置した日、22時と23時の2点が
+      //   「0時・1時」として全幅に引き伸ばされて描かれた。センサーが落ちた日も同じく崩れる。
+      //
+      //   目盛りは「t時ちょうど」の境界に、データ点は「h時台の中央」に置く。
+      //   こうすると上の行動ストリップ（24枠）の各枠の中央と一致し、縦に見て
+      //   「暑い時間帯に何をしていたか」が読める。
+      var XB = function (t) { return pL + (iw * t) / 24; };
+      var X = function (h) { return XB(h + 0.5); };
       var Y = function (v) { return pT + ih - ((v - lo) / (hi - lo)) * ih; };
+
+      var pts = [];
+      SERIES.forEach(function (c) {
+        if (!c || c[key] === null || c[key] === undefined) { return; }
+        pts.push({ h: c.hour, v: c[key] });
+      });
+      if (!pts.length) { return; }
+
+      // ★指定範囲の外に出た記録があれば範囲を広げる。
+      //   範囲を固定したまま切ると、暑い日ほど上へ飛び出す＝**一番見せたい記録だけが
+      //   グラフから消える**。普段は 22〜28℃ の狭い幅で微妙な上下を読ませたいので、
+      //   既定は狭く取り、外れたときだけ広げる。
+      //   広げる先は偶数側へ丸める。ceil だけだと 28.5℃ の日に上端が29℃になり、
+      //   目盛りの「28℃」と「29℃」が隣接して読めなくなる（2℃刻みで揃える）。
+      pts.forEach(function (p) {
+        if (p.v > hi) { hi = Math.ceil(p.v / 2) * 2; }
+        if (p.v < lo) { lo = Math.floor(p.v / 2) * 2; }
+      });
+      // 目盛りは範囲の内側のものだけ残し、上下端を必ず入れる（端が無いと軸が読めない）
+      ticks = [lo].concat(ticks.filter(function (v) { return v > lo && v < hi; }), [hi]);
+
       var f = document.createDocumentFragment();
 
-      if (thresh && thresh < hi) {
-        f.appendChild(el("rect", { x: pL, y: pT, width: iw, height: Math.max(0, Y(thresh) - pT), class: "band-crit" }));
-        f.appendChild(el("line", { x1: pL, y1: Y(thresh), x2: pL + iw, y2: Y(thresh), class: "thresh-line" }));
-        var tt = el("text", { x: pL + iw, y: Y(thresh) - 3, class: "thresh-text", "text-anchor": "end" });
-        tt.textContent = "危険 " + thresh + "℃";
+      // 閾値は複数引ける。範囲外（hi 以上）のものは描かない——範囲が広がったときだけ
+      // 上の線が現れる形になり、平常時は 26℃ の1本で済む。
+      threshes.forEach(function (th) {
+        if (th.v >= hi) { return; }
+        f.appendChild(el("rect", {
+          x: pL, y: pT, width: iw, height: Math.max(0, Y(th.v) - pT), class: "band-" + th.cls
+        }));
+        f.appendChild(el("line", {
+          x1: pL, y1: Y(th.v), x2: pL + iw, y2: Y(th.v), class: "thresh-line " + th.cls
+        }));
+        var tt = el("text", {
+          x: pL + iw, y: Y(th.v) - 3, class: "thresh-text " + th.cls, "text-anchor": "end"
+        });
+        tt.textContent = th.label;
         f.appendChild(tt);
-      }
+      });
       ticks.forEach(function (v) {
-        f.appendChild(el("line", { x1: pL, y1: Y(v), x2: pL + iw, y2: Y(v), class: "grid-line" }));
+        // 閾値と同じ高さには実線を引かない（破線と二重になって汚い）。数値ラベルは出す
+        var onThresh = threshes.some(function (th) { return th.v === v; });
+        if (!onThresh) {
+          f.appendChild(el("line", { x1: pL, y1: Y(v), x2: pL + iw, y2: Y(v), class: "grid-line" }));
+        }
         var t = el("text", { x: pL - 5, y: Y(v) + 3, class: "axis-text", "text-anchor": "end" });
         t.textContent = v + unit;
         f.appendChild(t);
       });
-      [0, 6, 12, 18, last].forEach(function (i) {
-        if (i > last) { return; }
+      [0, 6, 12, 18, 24].forEach(function (hh) {
         var t = el("text", {
-          x: X(i), y: H - 5, class: "axis-text",
-          "text-anchor": i === 0 ? "start" : (i === last ? "end" : "middle")
+          x: XB(hh), y: H - 5, class: "axis-text",
+          "text-anchor": hh === 0 ? "start" : (hh === 24 ? "end" : "middle")
         });
-        t.textContent = (i === 23 ? 24 : i) + "時";
+        t.textContent = hh + "時";
         f.appendChild(t);
       });
 
-      var dLine = "";
-      vals.forEach(function (v, i) { dLine += (i ? "L" : "M") + X(i).toFixed(1) + " " + Y(v).toFixed(1) + " "; });
       var gid = id + "-g", defs = el("defs", {});
       var lg = el("linearGradient", { id: gid, x1: "0", y1: "0", x2: "0", y2: "1" });
       lg.appendChild(el("stop", { offset: "0%", "stop-color": color, "stop-opacity": "0.2" }));
       lg.appendChild(el("stop", { offset: "100%", "stop-color": color, "stop-opacity": "0" }));
       defs.appendChild(lg); f.appendChild(defs);
-      f.appendChild(el("path", {
-        d: dLine + "L" + X(last).toFixed(1) + " " + (pT + ih) + " L" + pL + " " + (pT + ih) + " Z",
-        fill: "url(#" + gid + ")", stroke: "none"
-      }));
-      f.appendChild(el("path", { d: dLine, class: "series-line", stroke: color }));
-      f.appendChild(el("circle", { cx: X(last), cy: Y(vals[last]), r: 4, fill: color, class: "end-dot" }));
+
+      // 記録が飛んでいる区間は線を繋がない。繋ぐと、計測していない時間帯を
+      // 計測していたように見せてしまう。
+      var segs = [], cur = [];
+      pts.forEach(function (p, i) {
+        if (i && p.h - pts[i - 1].h > 1) { segs.push(cur); cur = []; }
+        cur.push(p);
+      });
+      if (cur.length) { segs.push(cur); }
+
+      segs.forEach(function (sg) {
+        if (sg.length < 2) {
+          f.appendChild(el("circle", { cx: X(sg[0].h), cy: Y(sg[0].v), r: 2, fill: color, stroke: "none" }));
+          return;
+        }
+        var d = sg.map(function (p, k) {
+          return (k ? "L" : "M") + X(p.h).toFixed(1) + " " + Y(p.v).toFixed(1);
+        }).join(" ");
+        f.appendChild(el("path", {
+          d: d + " L" + X(sg[sg.length - 1].h).toFixed(1) + " " + (pT + ih) +
+             " L" + X(sg[0].h).toFixed(1) + " " + (pT + ih) + " Z",
+          fill: "url(#" + gid + ")", stroke: "none"
+        }));
+        f.appendChild(el("path", { d: d, class: "series-line", stroke: color }));
+      });
+
+      var lastP = pts[pts.length - 1];
+      f.appendChild(el("circle", { cx: X(lastP.h), cy: Y(lastP.v), r: 4, fill: color, class: "end-dot" }));
+
+      // 最新の値は終点に直接添える（見出しに大きく出すより、どの点の値かが分かる）。
+      // 当日以外・センサー停止中は now が渡ってこないので何も出ない。
+      var curLabel = null;
+      if (now) {
+        curLabel = el("text", {
+          x: X(lastP.h) + 7, y: Y(lastP.v) - 6,
+          class: "cur-label " + (now.cls || ""), "text-anchor": "start"
+        });
+        curLabel.textContent = now.text;
+        f.appendChild(curLabel);
+      }
 
       var cross = el("line", { x1: 0, y1: pT, x2: 0, y2: pT + ih, class: "cross-line", opacity: "0" });
       var hdot = el("circle", { cx: 0, cy: 0, r: 4.5, fill: color, class: "end-dot", opacity: "0" });
@@ -455,19 +602,41 @@
       f.appendChild(hit);
       svg.appendChild(f);
 
+      // 終点ラベルが作図領域からはみ出すなら点の左側へ折り返す。
+      // ★幅は推定せず getComputedTextLength() で測る——文字数も書体も環境で変わるので、
+      //   決め打ちの閾値だと桁が増えた日にだけはみ出して横スクロールが出る。
+      if (curLabel) {
+        var tw = curLabel.getComputedTextLength();
+        if (X(lastP.h) + 7 + tw > pL + iw) {
+          curLabel.setAttribute("x", X(lastP.h) - 7);
+          curLabel.setAttribute("text-anchor", "end");
+        }
+      }
+
+      function hide() {
+        cross.setAttribute("opacity", "0"); hdot.setAttribute("opacity", "0"); tip.style.opacity = "0";
+      }
+
       function move(ev) {
         var r = svg.getBoundingClientRect();
-        var i = Math.round(((((ev.clientX - r.left) / r.width) * W) - pL) / iw * last);
-        if (i < 0) { i = 0; }
-        if (i > last) { i = last; }
-        var cx = X(i), cy = Y(vals[i]);
+        var h = ((((ev.clientX - r.left) / r.width) * W) - pL) / iw * 24 - 0.5;
+        // 記録のある時刻へ吸着する。1.5時間以上離れていたら何も出さない
+        // （記録の無い時間帯に、離れた時刻の値を出すと誤読させる）。
+        var best = null, bestD = 1e9;
+        pts.forEach(function (p) {
+          var d = Math.abs(p.h - h);
+          if (d < bestD) { bestD = d; best = p; }
+        });
+        if (!best || bestD > 1.5) { hide(); return; }
+
+        var cx = X(best.h), cy = Y(best.v);
         cross.setAttribute("x1", cx); cross.setAttribute("x2", cx); cross.setAttribute("opacity", "0.35");
         hdot.setAttribute("cx", cx); hdot.setAttribute("cy", cy); hdot.setAttribute("opacity", "1");
         // 先に文面を入れてから幅を測る（幅が確定しないとクランプできない）
-        tip.textContent = SERIES[i].hour + ":00　" + vals[i] + unit;
+        tip.textContent = best.h + ":00　" + best.v + unit;
         tip.style.opacity = "1";
         tip.style.top = (cy / H * 100) + "%";
-        // 右端・左端で吹き出しがコンテナからはみ出すと、ページ全体が横に広がり
+        // 端で吹き出しがコンテナからはみ出すと、ページ全体が横に広がり
         // iPhone が縮小表示になる。左右をコンテナ内へクランプする。
         var wrapW = (svg.parentElement && svg.parentElement.clientWidth) || svg.clientWidth;
         var half = tip.offsetWidth / 2 + 2;
@@ -479,15 +648,21 @@
       }
       hit.addEventListener("pointermove", move);
       hit.addEventListener("pointerdown", move);
-      hit.addEventListener("pointerleave", function () {
-        cross.setAttribute("opacity", "0"); hdot.setAttribute("opacity", "0"); tip.style.opacity = "0";
-      });
+      hit.addEventListener("pointerleave", hide);
     }
 
-    var temps = SERIES.map(function (c) { return c.temp; });
-    var hums = SERIES.map(function (c) { return c.hum; });
-    build("chart-temp", "tip-temp", temps, 22, 34, [22, 28, 34], "℃", C.crit, 28);
-    build("chart-hum", "tip-hum", hums, 40, 90, [40, 65, 90], "%", C.hum, null);
+    // 最新の値（当日かつセンサー稼働中のみ）。テンプレートが埋める。
+    var NOW = null;
+    var nowNode = document.getElementById("climate-now");
+    if (nowNode) { NOW = JSON.parse(nowNode.textContent || "null"); }
+
+    // 22〜28℃ の狭い幅。閾値は26℃（アラートが鳴る線）。28℃を超えた日は範囲が
+    // 自動で広がり、そのとき初めて 28℃ の危険線も現れる。
+    build("chart-temp", "tip-temp", "temp", 22, 28, [22, 24, 26, 28], "℃", C.crit,
+          [{ v: 26, cls: "warn", label: "注意 26℃" }, { v: 28, cls: "crit", label: "危険 28℃" }],
+          NOW && { text: NOW.temp + "℃", cls: NOW.status });
+    build("chart-hum", "tip-hum", "hum", 40, 90, [40, 65, 90], "%", C.hum, null,
+          NOW && { text: NOW.hum + "%", cls: "" });
   })();
   </script>
 
@@ -503,6 +678,26 @@
       var lb = document.getElementById("lb");
       return !!lb && getComputedStyle(lb).display !== "none";
     }
+
+    /* 拡大表示を閉じたときに、ページ側の倍率も1へ戻す。
+       ライトボックス内のピンチは img ではなくページ全体（visual viewport）を
+       拡大するので、閉じるだけだと日別詳細ページが拡大されたまま残る。
+       meta viewport を一瞬 maximum-scale=1 にすると Safari が倍率を戻す。
+       元の content へ復帰させないと、次に写真を開いてもピンチできなくなるので
+       必ず戻す。pristine な content は読み込み時に控えておく（連続で閉じたときに
+       書き換え済みの値を「元の値」として保存しないため）。 */
+    var vp = document.querySelector('meta[name="viewport"]');
+    var vpContent = vp ? vp.getAttribute("content") : null;
+    var vpTimer = null;
+    window.closeLightbox = function () {
+      var lb = document.getElementById("lb");
+      if (lb) { lb.style.display = "none"; }
+      if (!vp) { return; }
+      vp.setAttribute("content", vpContent + ", maximum-scale=1, user-scalable=no");
+      clearTimeout(vpTimer);
+      vpTimer = setTimeout(function () { vp.setAttribute("content", vpContent); }, 300);
+    };
+
     // ピンチズーム
     ["gesturestart", "gesturechange", "gestureend"].forEach(function (type) {
       document.addEventListener(type, function (e) {
